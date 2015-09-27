@@ -1,0 +1,10 @@
+MANIFEST.in
+NEWS.txt
+README.rst
+setup.py
+src/hoppMCMC/__init__.py
+src/hoppMCMC.egg-info/PKG-INFO
+src/hoppMCMC.egg-info/SOURCES.txt
+src/hoppMCMC.egg-info/dependency_links.txt
+src/hoppMCMC.egg-info/not-zip-safe
+src/hoppMCMC.egg-info/top_level.txt

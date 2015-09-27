@@ -1,0 +1,11 @@
+News
+====
+
+0.1
+-----
+
+*Release date: UNRELEASED*
+
+* Example news entry for the in-development version
+
+
