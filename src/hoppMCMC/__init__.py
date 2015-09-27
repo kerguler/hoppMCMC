@@ -96,15 +96,30 @@ class binfile():
         print "Success: %s closed" %(self.fname if self.fname else "file")
 
 def readFile(filename):
+    """
+    Reads a binary output file and returns all rows/columns
+
+    Parameters
+    ----------
+
+    filename:
+         name of the output file
+
+    Returns
+    -------
+
+    a numpy array with all the rows/columns
+   
+    """
     a=binfile(filename,"r")
     b=a.readRows()
     a.close()
     return b
     
 def parMin(parmat):
-        prm = min(parmat[:,0])
-        prmi = numpy.where(parmat[:,0]==prm)[0][0]
-        return {'i':prmi,'f':prm}
+    prm = min(parmat[:,0])
+    prmi = numpy.where(parmat[:,0]==prm)[0][0]
+    return {'i':prmi,'f':prm}
 
 def diagdot(mat,vec):
     for n in numpy.arange(mat.shape[0]):
@@ -266,21 +281,29 @@ class hoppMCMC:
               name of the output file (default='')
               use this option for a detailed account of the results
               
-              outfilename.final lists information on hopp-steps
+              outfilename.final lists information on hopp-steps:
+                   hopp-step
+                   acceptance (0/1)
+                   weighted average of exp{-f0/model_comp}
+                   weighted average of exp{-f1/model_comp}
+              outfilename.parmat lists chain status at the end of each adaptation step:
+                   adaptation step
                    chain id
-                   
-              outfilename.parmat lists chain status at the end of each adaptation step
-
-              both can be read using the readFile function
+                   annealing temperature
+                   score (f)
+                   parameter values
+              both files can be read using the readFile function
                 
         Returns
         -------
 
         A hoppMCMC object with 
 
-              parmat:
-              varmat:
-              parmats:
+              parmat: an array of num_chain x (1+len(param))
+                      current score (f) and parameter values for each chain
+              varmat: an array of len(inferpar) x len(inferpar)
+                      latest proposal distribution
+              parmats: final chain status (i.e. parmat) for each hopp-step
 
         See also
         --------
@@ -332,10 +355,6 @@ class hoppMCMC:
             for adapt_step in range(self.num_adapt):
                 self.runAdaptStep(hopp_step*self.num_adapt+adapt_step)
             if MPI_RANK == MPI_MASTER:
-                if not self.outfinal:
-                    for chain_id in range(self.num_chain):
-                        print "param.mat.final: %d,%d,%s" %(hopp_step,chain_id,join(self.parmat[chain_id,:],","))
-                # ---
                 test = {'acc':True, 'favg0':numpy.nan, 'favg1':numpy.nan} if len(self.parmats)==0 else compareAUC(self.parmats[-1][:,[0]+(1+self.inferpar).tolist()],self.parmat[:,[0]+(1+self.inferpar).tolist()],self.model_comp)
                 if test['acc']:
                     self.parmats.append(self.parmat)
@@ -346,7 +365,7 @@ class hoppMCMC:
                 if self.outfinal:
                     self.outfinal.writeRow([hopp_step,test['acc'],test['favg0'],test['favg1']])
                 else:
-                    print "parMatAcc.final: %d,%s" %(hopp_step,join([test['acc'],test['favg0'],test['favg1'],ldet(self.stat['cov'](self.parmat[:,1+self.inferpar]))],","))
+                    print "parMatAcc.final: %d,%s" %(hopp_step,join([test['acc'],test['favg0'],test['favg1']],","))
                 # ---
             if MPI_SIZE>1:
                 self.parmat = MPI.COMM_WORLD.bcast(self.parmat, root=MPI_MASTER)
@@ -401,8 +420,7 @@ class hoppMCMC:
                     tmp = [adapt_step,chain_id,self.anneal[0]]+self.parmat[chain_id,:].tolist()
                     self.outparmat.writeRow(tmp)
                 else:
-                    print "param.mat.step: %d,%d,%s" %(adapt_step,chain_id,join(self.parmat[chain_id,:],","))
-            print "parMatAcc.step: %d,%s" %(adapt_step,join([ldet(self.stat['cov'](self.parmat[:,1+self.inferpar])),self.anneal[0]],","))
+                    print "param.mat.step: %d,%d,%g,%s" %(adapt_step,chain_id,self.anneal[0],join(self.parmat[chain_id,:],","))
             # ---
             if len(self.anneal)>1: self.anneal = self.anneal[1:]            
         else:
@@ -416,7 +434,91 @@ class hoppMCMC:
 
 # --- Class: chainMCMC
 class chainMCMC:
-    def __init__(self,fitFun,parmat,varmat,gibbs=False,chain_id=0,pulsevar=1.0,anneal=1,accthr=0.5,inferpar=[],varmat_change=0,pulse_change=10,pulse_change_ratio=2,print_iter=0):
+    def __init__(self,
+                 fitFun,
+                 parmat,
+                 varmat,
+                 inferpar=[],
+                 gibbs=True,
+                 chain_id=0,
+                 pulsevar=1.0,
+                 anneal=1,
+                 accthr=0.5,
+                 varmat_change=0,
+                 pulse_change=10,
+                 pulse_change_ratio=2,
+                 print_iter=0):
+        """
+        MCMC Chain with Adaptive Proposal Distribution
+
+        Parameters
+        ----------
+        
+        fitFun:
+              fitFun(x) - objective function which takes a numpy array as the only argument
+
+        param:
+              initial parameter vector
+
+        varmat:
+              2-dimensional array of initial covariance matrix
+
+        inferpar:
+              an array of indexes of parameter dimensions to be inferred
+              (all parameters are inferred by default)
+              
+        gibbs:
+              indicates the type of chain iteration
+              True - Gibbs iteration where each parameter dimension has its own univariate
+                     Gaussian proposal distribution (default)
+              False - Metropolis-Hastings iteration where there is a single multivariate
+                     Gaussian proposal distribution
+
+        chain_id:
+              a chain identifier (default=0)
+
+        pulsevar:
+              scaling factor for the variance of the proposal distribution (default=1)
+
+        anneal:
+              annealing temperature (default=1)
+
+        accthr:
+              desired acceptance rate (default=0.5)
+
+        varmat_change:
+              how often variance should be updated? (default=0)
+              varmat_change=0 - fixed variance
+              varmat_change=n - variance is updated at each nth step
+
+        pulse_change:
+              how often pulsevar should be updated? (default=10)
+              pulse_change=0 - fixed pulsevar
+              pulse_change=n - pulsevar is updated at each nth step
+
+        pulse_change_ratio:
+              how should pulsevar be updated? (default=2)
+              (pulsevar *= pulse_change_ratio)
+
+        print_iter:
+              how often chain status should be printed? (default=0)
+              print_iter=0 - do not print status
+              print_iter=n - print status at each nth step
+              (default=0)
+              
+        Returns
+        -------
+
+        A chainMCMC object with 
+
+              getParam: a method for obtaining the latest iteration (f + parameter values)
+
+        See also
+        --------
+
+        the documentation (doc/hoppMCMC_manual.pdf) for more information and examples
+                            
+        """
         self.multi = {'cov': covariance,
                       'rnorm': numpy.random.multivariate_normal,
                       'det': numpy.linalg.det}
