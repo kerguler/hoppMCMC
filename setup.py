@@ -5,7 +5,6 @@ here = os.path.abspath(os.path.dirname(__file__))
 README = open(os.path.join(here, 'README.rst')).read()
 NEWS = open(os.path.join(here, 'NEWS.txt')).read()
 
-
 version = '0.1'
 
 # http://packages.python.org/distribute/setuptools.html#declaring-dependencies
@@ -14,7 +13,6 @@ install_requires = [
     'scipy>=0.14',
     'mpi4py>=1.3'
 ]
-
 
 setup(name='hoppMCMC',
     version=version,
