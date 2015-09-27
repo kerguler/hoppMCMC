@@ -1,5 +1,5 @@
-hoppMCMC: an adaptive basin-hopping Markov-chain Monte Carlo algorithm for Bayesian optimisation
-================================================================================================
+An adaptive basin-hopping Markov-chain Monte Carlo algorithm for Bayesian optimisation
+======================================================================================
 
 This is the python (v2.7) implementation of the hoppMCMC algorithm aiming to identify and sample from the high-probability regions of a posterior distribution. The algorithm combines three strategies: (i) parallel MCMC, (ii) adaptive Gibbs sampling and (iii) simulated annealing. Overall, hoppMCMC resembles the basin-hopping algorithm implemented in the optimize module of scipy, but it is developed for a wide range of modelling approaches including stochastic models with or without time-delay.
 
