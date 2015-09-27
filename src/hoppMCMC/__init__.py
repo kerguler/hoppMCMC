@@ -95,34 +95,6 @@ class binfile():
         self.f.close()
         print "Success: %s closed" %(self.fname if self.fname else "file")
 
-class binstream():
-    def __init__(self,filestream,rowsize=1):
-        self.headsize = 4
-        self.bitsize = 8
-        self.f = filestream
-        self.rowsize = rowsize
-        self.f.seek(0)
-        tmp = self.f.read(self.headsize)
-        if not tmp:
-            self.f.write(pack('<i',self.rowsize))
-        else:
-            self.rowsize = unpack('<i',tmp)[0]
-        self.fmt = '<'+'d'*self.rowsize
-        self.size = self.bitsize*self.rowsize
-        print "Success: Connected to stream for size %d double rows" %(self.rowsize)
-    # ---
-    def writeRow(self,row):
-        self.f.write(pack(self.fmt,*row))
-        self.f.flush()
-    # ---
-    def readRows(self):
-        self.f.seek(0,os.SEEK_END)
-        filesize = self.f.tell()
-        self.f.seek(self.headsize)
-        tmp=self.f.read(filesize-self.headsize)
-        ret=numpy.array(unpack('<'+'d'*((filesize-self.headsize)/self.bitsize),tmp),dtype=numpy.float64).reshape((((filesize-self.headsize)/self.bitsize)/self.rowsize,self.rowsize))
-        return ret
-
 def readFile(filename):
     a=binfile(filename,"r")
     b=a.readRows()
@@ -155,19 +127,6 @@ determinant = numpy.linalg.det
 
 def join(a,s):
     return s.join(["%.16g" %(x) for x in a])
-
-def calcAUC(f,parmat,T):
-    from scipy.stats import gaussian_kde
-    try:
-        kde = gaussian_kde(parmat.T)
-    except:
-        print 'Warning: Problem encountered in calcAUC!'
-        return {'res':None,'mean':0}
-    wt = numpy.array([kde.evaluate(pr) for pr in parmat])
-    wt /= numpy.min(wt)
-    # Importance sampling for Monte Carlo integration:
-    res = numpy.array([numpy.exp(-f[m]/T) / wt[m] for m in range(len(f))])
-    return {'res':res,'mean':numpy.mean(res)}
 
 def compareAUCs(parmats,groups,T):
     from scipy.stats import gaussian_kde
@@ -243,17 +202,91 @@ def finalTest(fitFun,param,testnum=10):
     
 # --- Class: hoppMCMC
 class hoppMCMC:
-    def __init__(self,fitFun,param,varmat,gibbs=False,anneal=1,num_hopp=1,num_adapt=10,num_chain=10,chain_length=100,rangeT=[1,1000],model_comp=1.0,method='posterior',param_reset=False,inferpar=[],print_iter=0,print_step=0,label='',outfilename=''):
+    def __init__(self,
+                 fitFun,
+                 param,
+                 varmat,
+                 inferpar=[],
+                 gibbs=True,
+                 num_hopp=3,
+                 num_adapt=25,
+                 num_chain=12,
+                 chain_length=50,
+                 rangeT=[1.0,1000.0],
+                 model_comp=1000.0,
+                 outfilename=''):
         """
         Adaptive Basin-Hopping MCMC Algorithm
-        
-        ***** args *****
 
+        Parameters
+        ----------
+        
         fitFun:
-              objective function which takes a numpy array as the only argument
+              fitFun(x) - objective function which takes a numpy array as the only argument
 
         param:
+              initial parameter vector
+
+        varmat:
+              2-dimensional array of initial covariance matrix
+
+        inferpar:
+              an array of indexes of parameter dimensions to be inferred
+              (all parameters are inferred by default)
               
+        gibbs:
+              indicates the type of chain iteration
+              True - Gibbs iteration where each parameter dimension has its own univariate
+                     Gaussian proposal distribution (default)
+              False - Metropolis-Hastings iteration where there is a single multivariate
+                     Gaussian proposal distribution
+
+        num_hopp:
+              number of hopp-steps (default=3)
+
+        num_adapt:
+              number of adaptation steps (default=25)
+              
+        num_chain:
+              number of MCMC chains (default=12)
+              
+        chain_length:
+              size of each chain (default=50)
+              
+        rangeT:
+              [min,max] - range of annealing temperatures for each hopp-step (default=[1,1000])
+              min should be as low as possible but not lower
+              max should be sufficiently permissive to be able to jump between posterior modes
+
+        model_comp:
+              tolerance for accepting subsequent hopp-steps (default=1000)
+              this should ideally be equal to or higher than max(rangeT)
+
+        outfilename:
+              name of the output file (default='')
+              use this option for a detailed account of the results
+              
+              outfilename.final lists information on hopp-steps
+                   chain id
+                   
+              outfilename.parmat lists chain status at the end of each adaptation step
+
+              both can be read using the readFile function
+                
+        Returns
+        -------
+
+        A hoppMCMC object with 
+
+              parmat:
+              varmat:
+              parmats:
+
+        See also
+        --------
+
+        the documentation (doc/hoppMCMC_manual.pdf) for more information and examples
+                            
         """
         self.multi = {'cov': covariance,
                       'rnorm': numpy.random.multivariate_normal,
@@ -267,17 +300,8 @@ class hoppMCMC:
         self.num_adapt = num_adapt
         self.num_chain = num_chain
         self.chain_length = chain_length
-        self.anneal = numpy.array(anneal,dtype=numpy.float64,ndmin=1)
         self.rangeT = numpy.sort(rangeT)
         self.model_comp = model_comp
-        self.param_reset = param_reset
-        self.method = method
-        if self.method not in ["posterior","anneal"]:
-            if MPI_RANK==MPI_MASTER:
-                Abort("Invalid method: %s" %(self.method))
-        self.print_iter = print_iter
-        self.print_step = print_step
-        self.label = label
         # ---
         self.fitFun = fitFun
         self.param = numpy.array(param,dtype=numpy.float64,ndmin=1)
@@ -304,14 +328,13 @@ class hoppMCMC:
                 self.outfinal = binfile(self.outfilename+'.final','w',4)
         # ---
         for hopp_step in range(self.num_hopp):
-            if self.method=="anneal":
-                self.anneal = anneal_sigmasoft(self.rangeT[0],self.rangeT[1],self.num_adapt)
+            self.anneal = anneal_sigmasoft(self.rangeT[0],self.rangeT[1],self.num_adapt)
             for adapt_step in range(self.num_adapt):
                 self.runAdaptStep(hopp_step*self.num_adapt+adapt_step)
             if MPI_RANK == MPI_MASTER:
                 if not self.outfinal:
                     for chain_id in range(self.num_chain):
-                        print "param.mat.final.%s: %d,%d,%s" %(self.label,hopp_step,chain_id,join(self.parmat[chain_id,:],","))
+                        print "param.mat.final: %d,%d,%s" %(hopp_step,chain_id,join(self.parmat[chain_id,:],","))
                 # ---
                 test = {'acc':True, 'favg0':numpy.nan, 'favg1':numpy.nan} if len(self.parmats)==0 else compareAUC(self.parmats[-1][:,[0]+(1+self.inferpar).tolist()],self.parmat[:,[0]+(1+self.inferpar).tolist()],self.model_comp)
                 if test['acc']:
@@ -323,7 +346,7 @@ class hoppMCMC:
                 if self.outfinal:
                     self.outfinal.writeRow([hopp_step,test['acc'],test['favg0'],test['favg1']])
                 else:
-                    print "parMatAcc.final.%s: %d,%s" %(self.label,hopp_step,join([test['acc'],test['favg0'],test['favg1'],ldet(self.stat['cov'](self.parmat[:,1+self.inferpar]))],","))
+                    print "parMatAcc.final: %d,%s" %(hopp_step,join([test['acc'],test['favg0'],test['favg1'],ldet(self.stat['cov'](self.parmat[:,1+self.inferpar]))],","))
                 # ---
             if MPI_SIZE>1:
                 self.parmat = MPI.COMM_WORLD.bcast(self.parmat, root=MPI_MASTER)
@@ -337,21 +360,18 @@ class hoppMCMC:
                 self.outfinal.close()
 
     def runAdaptStep(self,adapt_step):
-        if self.method=="anneal":
-            if MPI_RANK == MPI_MASTER:
-                pm = parMin(self.parmat)
-                self.param = self.parmat[pm['i'],1:].copy()
-                self.parmat = numpy.array([self.parmat[pm['i'],:].tolist() for n in range(self.num_chain)],dtype=numpy.float64)
-            if MPI_SIZE>1:
-                self.param = MPI.COMM_WORLD.bcast(self.param, root=MPI_MASTER)
-                self.parmat = MPI.COMM_WORLD.bcast(self.parmat, root=MPI_MASTER)
+        if MPI_RANK == MPI_MASTER:
+            pm = parMin(self.parmat)
+            self.param = self.parmat[pm['i'],1:].copy()
+            self.parmat = numpy.array([self.parmat[pm['i'],:].tolist() for n in range(self.num_chain)],dtype=numpy.float64)
+        if MPI_SIZE>1:
+            self.param = MPI.COMM_WORLD.bcast(self.param, root=MPI_MASTER)
+            self.parmat = MPI.COMM_WORLD.bcast(self.parmat, root=MPI_MASTER)
         # ---
         for chain_id in self.rank_indices[MPI_RANK]:
             # ---
-            # print "Passing parameter %s to chain %d" %(join(self.param,","),chain_id)
-            # ---
             mcmc = chainMCMC(self.fitFun,
-                             self.param if self.param_reset else self.parmat[chain_id,1:],
+                             self.param,
                              self.varmat,
                              gibbs=self.gibbs,
                              chain_id=chain_id,
@@ -362,8 +382,7 @@ class hoppMCMC:
                              varmat_change=0,
                              pulse_change=10,
                              pulse_change_ratio=2,
-                             print_iter=self.print_iter,
-                             label="%s.%d.%d" %(self.label,adapt_step,chain_id))
+                             print_iter=0)
             for m in range(self.chain_length):
                 mcmc.iterate()
             self.parmat[chain_id,:] = mcmc.getParam()
@@ -377,30 +396,27 @@ class hoppMCMC:
             self.varmat = numpy.array(self.stat['cov'](self.parmat[:,1+self.inferpar]),ndmin=2)
             self.varmat[numpy.abs(self.varmat)<EPS_VARMAT_MIN] = 1.0
             # ---
-            if self.print_step and (adapt_step%self.print_step)==0:
-                for chain_id in range(self.num_chain):
-                    if self.outparmat:
-                        tmp = [adapt_step,chain_id,self.anneal[0]]+self.parmat[chain_id,:].tolist()
-                        self.outparmat.writeRow(tmp)
-                    else:
-                        print "param.mat.step.%s: %d,%d,%s" %(self.label,adapt_step,chain_id,join(self.parmat[chain_id,:],","))
-                print "parMatAcc.step.%s: %d,%s" %(self.label,adapt_step,join([ldet(self.stat['cov'](self.parmat[:,1+self.inferpar])),self.anneal[0]],","))
+            for chain_id in range(self.num_chain):
+                if self.outparmat:
+                    tmp = [adapt_step,chain_id,self.anneal[0]]+self.parmat[chain_id,:].tolist()
+                    self.outparmat.writeRow(tmp)
+                else:
+                    print "param.mat.step: %d,%d,%s" %(adapt_step,chain_id,join(self.parmat[chain_id,:],","))
+            print "parMatAcc.step: %d,%s" %(adapt_step,join([ldet(self.stat['cov'](self.parmat[:,1+self.inferpar])),self.anneal[0]],","))
             # ---
-            if self.method=="anneal":
-                if len(self.anneal)>1: self.anneal = self.anneal[1:]            
+            if len(self.anneal)>1: self.anneal = self.anneal[1:]            
         else:
              MPI.COMM_WORLD.send(self.parmat, dest=MPI_MASTER, tag=1)
         # ---
         if MPI_SIZE>1:
             self.parmat = MPI.COMM_WORLD.bcast(self.parmat, root=MPI_MASTER)
             self.varmat = MPI.COMM_WORLD.bcast(self.varmat, root=MPI_MASTER)
-            if self.method=="anneal":
-                self.anneal = MPI.COMM_WORLD.bcast(self.anneal, root=MPI_MASTER)
+            self.anneal = MPI.COMM_WORLD.bcast(self.anneal, root=MPI_MASTER)
         # ---
 
 # --- Class: chainMCMC
 class chainMCMC:
-    def __init__(self,fitFun,parmat,varmat,gibbs=False,chain_id=0,pulsevar=1.0,anneal=1,accthr=0.5,inferpar=[],varmat_change=0,pulse_change=10,pulse_change_ratio=2,print_iter=0,label=''):
+    def __init__(self,fitFun,parmat,varmat,gibbs=False,chain_id=0,pulsevar=1.0,anneal=1,accthr=0.5,inferpar=[],varmat_change=0,pulse_change=10,pulse_change_ratio=2,print_iter=0):
         self.multi = {'cov': covariance,
                       'rnorm': numpy.random.multivariate_normal,
                       'det': numpy.linalg.det}
@@ -450,7 +466,6 @@ class chainMCMC:
         if self.pulse_change<25:
             self.halfa = 0.05
         self.print_iter = print_iter
-        self.label = label
         self.step = 0
         self.index = 0
         self.index_acc = 0
@@ -540,7 +555,7 @@ class chainMCMC:
             self.parmat[self.index,1:] = param1
         # ---
         if self.print_iter and (self.step%self.print_iter)==0:
-            print "param.mat.chain.%s: %d,%d,%s" %(self.label,self.step,self.chain_id,join(self.parmat[self.index,:],","))
+            print "param.mat.chain: %d,%d,%s" %(self.step,self.chain_id,join(self.parmat[self.index,:],","))
         # ---
         if self.step>1:
             # --- 
@@ -553,7 +568,7 @@ class chainMCMC:
                 self.varmat[a,a] = EPS_VARMAT_MIN
         # --- 
         if self.print_iter and (self.step%self.print_iter)==0:
-            print "parMatAcc.chain.%s: %s" %(self.label,join([self.step,self.chain_id,ldet(self.multi['cov'](self.parmat[:,1+self.inferpar])),ldet(self.varmat),numpy.mean(self.acc_vec),self.pulsevar],","))
+            print "parMatAcc.chain: %s" %(join([self.step,self.chain_id,ldet(self.multi['cov'](self.parmat[:,1+self.inferpar])),ldet(self.varmat),numpy.mean(self.acc_vec),self.pulsevar],","))
 
     def iterateSingle(self):
         self.step += 1
@@ -582,7 +597,7 @@ class chainMCMC:
                 Abort("Iterate single failed with %g: %s" %(f0,join(param0,",")))
         # ---
         if self.print_iter and (self.step%self.print_iter)==0:
-            print "param.mat.chain.%s: %d,%d,%s" %(self.label,self.step,self.chain_id,join(self.parmat[self.index,:],","))
+            print "param.mat.chain: %d,%d,%s" %(self.step,self.chain_id,join(self.parmat[self.index,:],","))
         # ---
         if self.step>1:
             # --- 
@@ -595,7 +610,7 @@ class chainMCMC:
                     self.varmat[param_id,param_id] = max(EPS_VARMAT_MIN,self.single['cov'](self.parmat[:,1+self.inferpar[param_id]]))
         # --- 
         if self.print_iter and (self.step%self.print_iter)==0:
-            print "parMatAcc.chain.%s: %s" %(self.label,join([self.step,self.chain_id,ldet(self.multi['cov'](self.parmat[:,1+self.inferpar])),ldet(self.varmat)],","))
-            print "parMatAcc.chain.accs.%s: %d,%d,%s" %(self.label,self.step,self.chain_id,join([numpy.mean(acc_vec) for acc_vec in self.acc_vecs],","))
-            print "parMatAcc.chain.pulses.%s: %d,%d,%s" %(self.label,self.step,self.chain_id,join(self.pulsevar,","))
+            print "parMatAcc.chain: %s" %(join([self.step,self.chain_id,ldet(self.multi['cov'](self.parmat[:,1+self.inferpar])),ldet(self.varmat)],","))
+            print "parMatAcc.chain.accs: %d,%d,%s" %(self.step,self.chain_id,join([numpy.mean(acc_vec) for acc_vec in self.acc_vecs],","))
+            print "parMatAcc.chain.pulses: %d,%d,%s" %(self.step,self.chain_id,join(self.pulsevar,","))
 

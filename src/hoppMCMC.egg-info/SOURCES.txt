@@ -1,6 +1,7 @@
 MANIFEST.in
 NEWS.txt
-README.rst
+README.txt
+setup.cfg
 setup.py
 src/hoppMCMC/__init__.py
 src/hoppMCMC.egg-info/PKG-INFO
