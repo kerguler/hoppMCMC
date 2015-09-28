@@ -1,23 +1,10 @@
-##########################################################################
-## hoppMCMC: adaptive basin-hopping Markov-chain Monte Carlo            ##
-##           for Bayesian optimisation                                  ##
-##                                                                      ##
-## Copyright (C) 2015 Kamil Erguler (k.erguler@cyi.ac.cy)               ##
-##                                                                      ##
-## This program is free software: you can redistribute it and/or modify ##
-## it under the terms of the GNU General Public License version 3 as    ##
-## published by the Free Software Foundation.                           ##
-##                                                                      ##
-## This program is distributed in the hope that it will be useful,      ##
-## but WITHOUT ANY WARRANTY; without even the implied warranty of       ##
-## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the         ##
-## GNU General Public License, <http://www.gnu.org/licenses/>,          ##
-## for more details.                                                    ##
-##                                                                      ##
-## Author: Kamil Erguler (k.erguler@cyi.ac.cy)                          ##
-## Dates: Aug 5, 2015;                                                  ##
-## Organisation: The Cyprus Institute                                   ##
-##########################################################################
+"""
+
+adaptive basin-hopping Markov-chain Monte Carlo for Bayesian optimisation
+
+This is the python (v2.7) implementation of the hoppMCMC algorithm aiming to identify and sample from the high-probability regions of a posterior distribution. The algorithm combines three strategies: (i) parallel MCMC, (ii) adaptive Gibbs sampling and (iii) simulated annealing. Overall, hoppMCMC resembles the basin-hopping algorithm implemented in the optimize module of scipy, but it is developed for a wide range of modelling approaches including stochastic models with or without time-delay.
+
+"""
 
 import os
 import sys
@@ -231,6 +218,7 @@ class hoppMCMC:
                  model_comp=1000.0,
                  outfilename=''):
         """
+                 
         Adaptive Basin-Hopping MCMC Algorithm
 
         Parameters
@@ -303,7 +291,7 @@ class hoppMCMC:
                       current score (f) and parameter values for each chain
               varmat: an array of len(inferpar) x len(inferpar)
                       latest proposal distribution
-              parmats: final chain status (i.e. parmat) for each hopp-step
+              parmats: a list of parameter values (i.e. parmat) accepted at the end of hopp-steps
 
         See also
         --------
@@ -436,7 +424,7 @@ class hoppMCMC:
 class chainMCMC:
     def __init__(self,
                  fitFun,
-                 parmat,
+                 param,
                  varmat,
                  inferpar=[],
                  gibbs=True,
@@ -449,8 +437,15 @@ class chainMCMC:
                  pulse_change_ratio=2,
                  print_iter=0):
         """
+                 
         MCMC Chain with Adaptive Proposal Distribution
 
+        Usage
+        -----
+
+        Once created, a chainMCMC is iterated using the iterate method.
+        Depending on the value of gibbs, this method calls either iterateMulti or iterateSingle.
+        
         Parameters
         ----------
         
@@ -528,7 +523,7 @@ class chainMCMC:
         # ---
         self.chain_id = chain_id;
         self.fitFun = fitFun
-        self.parmat = numpy.array(parmat,dtype=numpy.float64,ndmin=1)
+        self.parmat = numpy.array(param,dtype=numpy.float64,ndmin=1)
         self.varmat = numpy.array(varmat,dtype=numpy.float64,ndmin=2)
         self.inferpar = numpy.array(inferpar,dtype=numpy.int32)
         self.anneal = numpy.array(anneal,dtype=numpy.float64,ndmin=1)
@@ -573,7 +568,7 @@ class chainMCMC:
         self.index_acc = 0
 
     def getParam(self):
-        return self.parmat[self.index,:]
+        return self.parmat[self.index,:].copy()
 
     def getVarPar(self):
         return ldet(self.multi['cov'](self.parmat[:,1+self.inferpar]))
