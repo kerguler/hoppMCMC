@@ -1,6 +1,14 @@
 News
 ====
 
+0.2
+-----
+
+*Release date: 28-Sep-2015*
+
+* This version includes a documentation and examples
+
+
 0.1
 -----
 
