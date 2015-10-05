@@ -130,11 +130,16 @@ determinant = numpy.linalg.det
 def join(a,s):
     return s.join(["%.16g" %(x) for x in a])
 
-def compareAUCs(parmats,groups,T):
+def logsumexp(x):
+    a = numpy.max(x)
+    return a+numpy.log(numpy.sum(numpy.exp(x-a)))
+
+def compareAUCs(parmats,groups,tol=1.0):
     from scipy.stats import gaussian_kde
     ids = numpy.unique(groups)
     parmats = parmats[:,numpy.var(parmats,axis=0)!=0]
     parmat_list = [parmats[groups==n,:] for n in ids]
+    counts = [numpy.sum(n==groups) for n in ids]
     try:
         kde = gaussian_kde(parmats[:,1:].T)
     except:
@@ -142,10 +147,11 @@ def compareAUCs(parmats,groups,T):
         return {ids[g]:0 for g in range(len(ids))}
     wt_list = numpy.array([[kde.evaluate(pr) for pr in parmat[:,1:]] for parmat in parmat_list])
     mn = numpy.min(wt_list)
-    wt_list /= mn
+    wt_list = numpy.log(wt_list/mn)
     # Importance sampling for Monte Carlo integration:
-    favg_list = numpy.array([numpy.mean([numpy.exp(-parmat_list[n][m,0]/T) / wt_list[n][m] for m in range(parmat_list[n].shape[0])]) for n in range(len(parmat_list))])
-    favg_list /= numpy.sum(favg_list)
+    favg_exp = numpy.array([[-parmat_list[n][m,0]/tol-wt_list[n][m] for m in range(parmat_list[n].shape[0])] for n in range(len(parmat_list))])
+    favg_logsums = numpy.array([logsumexp(x) for x in favg_exp])-numpy.log(counts)
+    favg_list = numpy.exp(favg_logsums-logsumexp(favg_logsums))
     return {ids[g]:favg_list[g] for g in range(len(ids))}
 
 def compareAUC(parmat0,parmat1,T):

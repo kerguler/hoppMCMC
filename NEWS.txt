@@ -1,6 +1,14 @@
 News
 ====
 
+0.3
+-----
+
+*Release date: UNRELEASED*
+
+* This version includes an improvement in compareAUCs
+
+
 0.2
 -----
 
