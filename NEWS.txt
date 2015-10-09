@@ -4,7 +4,7 @@ News
 0.3
 -----
 
-*Release date: UNRELEASED*
+*Release date: 09-Oct-2015*
 
 * This version includes an improvement in compareAUCs
 
