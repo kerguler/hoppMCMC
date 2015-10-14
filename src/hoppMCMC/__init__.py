@@ -214,13 +214,13 @@ class hoppMCMC:
                  fitFun,
                  param,
                  varmat,
-                 inferpar=[],
+                 inferpar=None,
                  gibbs=True,
                  num_hopp=3,
                  num_adapt=25,
                  num_chain=12,
                  chain_length=50,
-                 rangeT=[1.0,1000.0],
+                 rangeT=None,
                  model_comp=1000.0,
                  outfilename=''):
         """
@@ -317,7 +317,7 @@ class hoppMCMC:
         self.num_adapt = num_adapt
         self.num_chain = num_chain
         self.chain_length = chain_length
-        self.rangeT = numpy.sort(rangeT)
+        self.rangeT = numpy.sort([1.0,1000.0] if rangeT is None else rangeT)
         self.model_comp = model_comp
         # ---
         self.fitFun = fitFun
@@ -327,10 +327,10 @@ class hoppMCMC:
         self.varmat = numpy.array(varmat,dtype=numpy.float64,ndmin=2)
         self.parmats = []
         # ---
-        if len(inferpar):
-            self.inferpar = numpy.array(inferpar,dtype=numpy.int32)
-        else:
+        if inferpar is None:
             self.inferpar = numpy.arange(len(self.param),dtype=numpy.int32)
+        else:
+            self.inferpar = numpy.array(inferpar,dtype=numpy.int32)
         print "Parameters to infer: %s" %(join(self.inferpar,","))
         # ---
         self.rank_indices = [numpy.arange(i,self.num_chain,MPI_SIZE) for i in range(MPI_SIZE)]
@@ -432,7 +432,7 @@ class chainMCMC:
                  fitFun,
                  param,
                  varmat,
-                 inferpar=[],
+                 inferpar=None,
                  gibbs=True,
                  chain_id=0,
                  pulsevar=1.0,
@@ -531,7 +531,10 @@ class chainMCMC:
         self.fitFun = fitFun
         self.parmat = numpy.array(param,dtype=numpy.float64,ndmin=1)
         self.varmat = numpy.array(varmat,dtype=numpy.float64,ndmin=2)
-        self.inferpar = numpy.array(inferpar,dtype=numpy.int32)
+        if inferpar is None:
+            self.inferpar = numpy.arange(len(param),dtype=numpy.int32)
+        else:
+            self.inferpar = numpy.array(inferpar,dtype=numpy.int32)
         self.anneal = numpy.array(anneal,dtype=numpy.float64,ndmin=1)
         self.accthr = numpy.array(accthr,dtype=numpy.float64,ndmin=1)
         # ---
