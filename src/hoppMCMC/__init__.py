@@ -26,8 +26,7 @@ except:
     def Abort(str):
         raise errorMCMC(str)
 
-EPS_PULSE_MIN = 1e-7
-EPS_PULSE_MAX = 1e7
+EPS_PULSE_VAR_MIN = 1e-12
 EPS_VARMAT_MIN = 1e-7
 EPS_VARMAT_MAX = 1e7
 
@@ -441,6 +440,10 @@ class chainMCMC:
                  varmat_change=0,
                  pulse_change=10,
                  pulse_change_ratio=2,
+                 pulse_allow_decrease=True,
+                 pulse_allow_increase=True,
+                 pulse_min=1e-7,
+                 pulse_max=1e7,
                  print_iter=0):
         """
                  
@@ -501,6 +504,18 @@ class chainMCMC:
               how should pulsevar be updated? (default=2)
               (pulsevar *= pulse_change_ratio)
 
+        pulse_allow_increase:
+             allow pulse to increase (default=True)
+
+        pulse_allow_decrease:
+             allow pulse to decrease (default=True)
+
+        pulse_min:
+             minimum value of pulse (default=1e-7)
+             
+        pulse_max:
+             maximum value of pulse (default=1e7)
+             
         print_iter:
               how often chain status should be printed? (default=0)
               print_iter=0 - do not print status
@@ -544,6 +559,10 @@ class chainMCMC:
         self.pulse_decrease = numpy.float64(1.0/self.pulse_change_ratio)
         self.pulse_change = pulse_change
         self.pulse_collect = max(1,self.pulse_change)
+        self.allow_pincr = pulse_allow_increase
+        self.allow_pdecr = pulse_allow_decrease
+        self.pulse_min = pulse_min
+        self.pulse_max = pulse_max
         self.varmat_change = varmat_change
         self.varmat_collect = max(1,self.varmat_change)
         # ---
@@ -564,6 +583,7 @@ class chainMCMC:
             self.pulsevar = pulsevar
             self.acc_vec = numpy.repeat(False,self.pulse_collect)
             self.iterate = self.iterateMulti
+        self.pulsevar0 = self.pulsevar
         if not self.gibbs and (self.parmat.shape[1]==2 or self.inferpar.shape[0]==1):
             Abort("Please set gibbs=True!")
         self.varmat = self.varmat*self.pulsevar
@@ -594,15 +614,15 @@ class chainMCMC:
     def setParam(self,parmat):
         self.parmat[self.index,:] = numpy.array(parmat,dtype=numpy.float64,ndmin=1).copy()
 
-    def newParamSingle(self,param,stdev):
+    def newParamSingle(self,param,param_id):
         try:
             param1 = self.single['rnorm'](param,
-                                          stdev)
+                                          self.varmat[param_id,param_id]*self.pulsevar[param_id])
         except:
             print "Warning: Failed to generate a new parameter set"
             param1 = numpy.copy(param)
         return param1
-        
+
     def newParamMulti(self):
         try:
             param1 = self.multi['rnorm'](self.parmat[self.index,1:][self.inferpar],self.varmat*self.pulsevar)
@@ -610,7 +630,7 @@ class chainMCMC:
             print "Warning: Failed to generate a new parameter set"
             param1 = numpy.copy(self.parmat[self.index,1:][self.inferpar])
         return param1
-    
+
     def checkMove(self,f0,f1):
         acc = (not numpy.isnan(f1) and not numpy.isinf(f1) and
             f1 >= 0 and
@@ -624,20 +644,20 @@ class chainMCMC:
         return(acc)
 
     def pulsevarUpdate(self,acc_vec):
-        # --- Test if higher than accthr
+        # --- Test if mean(acc_vec) is equal to accthr
         try:
             r = ttest(acc_vec,self.accthr)
         except ZeroDivisionError:
-            if all(acc_vec)<=0:
+            if all(acc_vec)<=0 and self.allow_pdecr:
                 return self.pulse_decrease
-            elif all(acc_vec)>=0:
+            elif all(acc_vec)>=0 and self.allow_pincr:
                 return self.pulse_increase
             else:
                 return self.pulse_nochange
-        if (r[0]>0 and r[1]<self.halfa): return self.pulse_increase
-        # --- Test if lower than accthr
-        r = ttest(acc_vec,max(0.01,self.accthr-0.15))
-        if (r[0]<0 and r[1]<self.halfa): return self.pulse_decrease
+        # ---
+        if r[1]>=self.halfa: return self.pulse_nochange
+        if r[0]>0 and self.allow_pincr: return self.pulse_increase
+        if r[0]<0 and self.allow_pdecr: return self.pulse_decrease
         # --- Return default
         return self.pulse_nochange
 
@@ -685,8 +705,7 @@ class chainMCMC:
         param0 = self.parmat[self.index,1:].copy()
         for param_id in numpy.arange(len(self.inferpar)):
             param1 = param0.copy()
-            param1[self.inferpar[param_id]] = self.newParamSingle(param1[self.inferpar[param_id]],
-                                                                  self.varmat[param_id,param_id]*self.pulsevar[param_id])
+            param1[self.inferpar[param_id]] = self.newParamSingle(param1[self.inferpar[param_id]],param_id)
             f1 = self.fitFun(param1)
             acc = self.checkMove(f0,f1)
             if acc:
@@ -709,11 +728,15 @@ class chainMCMC:
             # --- 
             if self.pulse_change and (self.step%self.pulse_change)==0:
                 for param_id in numpy.arange(len(self.inferpar)):
-                    self.pulsevar[param_id] = min(EPS_PULSE_MAX,max(EPS_PULSE_MIN,self.pulsevar[param_id]*self.pulsevarUpdate(self.acc_vecs[param_id])))
+                    tmp = min(self.pulse_max,max(self.pulse_min,self.pulsevar[param_id]*self.pulsevarUpdate(self.acc_vecs[param_id])))
+                    if numpy.abs(self.varmat[param_id,param_id]*tmp) >= EPS_PULSE_VAR_MIN:
+                        self.pulsevar[param_id] = tmp
             # --- 
             if self.varmat_change and (self.step%self.varmat_change)==0:
                 for param_id in numpy.arange(len(self.inferpar)):
-                    self.varmat[param_id,param_id] = max(EPS_VARMAT_MIN,self.single['cov'](self.parmat[:,1+self.inferpar[param_id]]))
+                    tmp = max(EPS_VARMAT_MIN,self.single['cov'](self.parmat[:,1+self.inferpar[param_id]]))
+                    if numpy.abs(tmp*self.pulsevar[param_id]) >= EPS_PULSE_VAR_MIN:
+                        self.varmat[param_id,param_id] = tmp
         # --- 
         if self.print_iter and (self.step%self.print_iter)==0:
             print "parMatAcc.chain: %s" %(join([self.step,self.chain_id,ldet(self.multi['cov'](self.parmat[:,1+self.inferpar])),ldet(self.varmat)],","))

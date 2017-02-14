@@ -1,6 +1,13 @@
 News
 ====
 
+0.5
+-----
+
+*UNRELEASED*
+
+* Minor improvement on pulsevarUpdate
+
 0.4
 -----
 

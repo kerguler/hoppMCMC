@@ -1,2 +1,2 @@
-hoppMCMC/__init__
 hoppMCMC
+hoppMCMC/__init__
