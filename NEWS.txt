@@ -4,7 +4,7 @@ News
 0.5
 -----
 
-*UNRELEASED*
+*Release date: 14-Feb-2017*
 
 * Minor improvement on pulsevarUpdate
 
