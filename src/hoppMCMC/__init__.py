@@ -529,6 +529,8 @@ class chainMCMC:
 
               getParam: a method for obtaining the latest iteration (f + parameter values)
 
+              getVarmat: a method for obtaining the latest proposal distribution (varmat * pulsevar)
+
         See also
         --------
 
@@ -598,6 +600,9 @@ class chainMCMC:
 
     def getParam(self):
         return self.parmat[self.index,:].copy()
+
+    def getVarmat(self):
+        return (self.varmat*self.pulsevar).copy()
 
     def getVarPar(self):
         return ldet(self.multi['cov'](self.parmat[:,1+self.inferpar]))

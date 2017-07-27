@@ -1,6 +1,13 @@
 News
 ====
 
+0.6
+-----
+
+*UNRELEASED*
+
+* Print out the covariates in addition to the parameters
+
 0.5
 -----
 
