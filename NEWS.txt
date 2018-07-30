@@ -1,6 +1,13 @@
 News
 ====
 
+1.0
+-----
+
+*Release date: 30-Jul-2018*
+
+* Compatible with Python 3
+
 0.6
 -----
 

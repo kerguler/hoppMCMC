@@ -63,7 +63,7 @@ class binfile():
             Abort("Wrong i/o mode: "+self.mode)
         self.fmt = '<'+'d'*self.rowsize
         self.size = self.bitsize*self.rowsize
-        print "Success: %s opened for %s size %d double rows" %(self.fname,"reading" if self.mode=='r' else "writing",self.rowsize)
+        print("Success: %s opened for %s size %d double rows" %(self.fname,"reading" if self.mode=='r' else "writing",self.rowsize))
     # ---
     def writeRow(self,row):
         self.f.write(pack(self.fmt,*row))
@@ -79,7 +79,7 @@ class binfile():
     # ---
     def close(self):
         self.f.close()
-        print "Success: %s closed" %(self.fname if self.fname else "file")
+        print("Success: %s closed" %(self.fname if self.fname else "file"))
 
 def readFile(filename):
     """
@@ -142,7 +142,7 @@ def compareAUCs(parmats,groups,tol=1.0):
     try:
         kde = gaussian_kde(parmats[:,1:].T)
     except:
-        print 'Warning: Problem encountered in compareAUC!'
+        print("Warning: Problem encountered in compareAUC!")
         return {ids[g]:0 for g in range(len(ids))}
     wt_list = numpy.array([[kde.evaluate(pr) for pr in parmat[:,1:]] for parmat in parmat_list])
     mn = numpy.min(wt_list)
@@ -162,7 +162,7 @@ def compareAUC(parmat0,parmat1,T):
     try:
         kde = gaussian_kde(parmats[:,1:].T)
     except:
-        print 'Warning: Problem encountered in compareAUC!'
+        print("Warning: Problem encountered in compareAUC!")
         return {'acc':0, 'favg0':0, 'favg1':0}
     wt0 = numpy.array([kde.evaluate(pr) for pr in parmat0cp[:,1:]])
     wt1 = numpy.array([kde.evaluate(pr) for pr in parmat1cp[:,1:]])
@@ -330,7 +330,7 @@ class hoppMCMC:
             self.inferpar = numpy.arange(len(self.param),dtype=numpy.int32)
         else:
             self.inferpar = numpy.array(inferpar,dtype=numpy.int32)
-        print "Parameters to infer: %s" %(join(self.inferpar,","))
+        print("Parameters to infer: %s" %(join(self.inferpar,",")))
         # ---
         self.rank_indices = [numpy.arange(i,self.num_chain,MPI_SIZE) for i in range(MPI_SIZE)]
         self.worker_indices = numpy.delete(range(MPI_SIZE),MPI_MASTER)
@@ -358,7 +358,7 @@ class hoppMCMC:
                 if self.outfinal:
                     self.outfinal.writeRow([hopp_step,test['acc'],test['favg0'],test['favg1']])
                 else:
-                    print "parMatAcc.final: %d,%s" %(hopp_step,join([test['acc'],test['favg0'],test['favg1']],","))
+                    print("parMatAcc.final: %d,%s" %(hopp_step,join([test['acc'],test['favg0'],test['favg1']],",")))
                 # ---
             if MPI_SIZE>1:
                 self.parmat = MPI.COMM_WORLD.bcast(self.parmat, root=MPI_MASTER)
@@ -413,7 +413,7 @@ class hoppMCMC:
                     tmp = [adapt_step,chain_id,self.anneal[0]]+self.parmat[chain_id,:].tolist()
                     self.outparmat.writeRow(tmp)
                 else:
-                    print "param.mat.step: %d,%d,%g,%s" %(adapt_step,chain_id,self.anneal[0],join(self.parmat[chain_id,:],","))
+                    print("param.mat.step: %d,%d,%g,%s" %(adapt_step,chain_id,self.anneal[0],join(self.parmat[chain_id,:],",")))
             # ---
             if len(self.anneal)>1: self.anneal = self.anneal[1:]            
         else:
@@ -624,7 +624,7 @@ class chainMCMC:
             param1 = self.single['rnorm'](param,
                                           self.varmat[param_id,param_id]*self.pulsevar[param_id])
         except:
-            print "Warning: Failed to generate a new parameter set"
+            print("Warning: Failed to generate a new parameter set")
             param1 = numpy.copy(param)
         return param1
 
@@ -632,7 +632,7 @@ class chainMCMC:
         try:
             param1 = self.multi['rnorm'](self.parmat[self.index,1:][self.inferpar],self.varmat*self.pulsevar)
         except numpy.linalg.linalg.LinAlgError:
-            print "Warning: Failed to generate a new parameter set"
+            print("Warning: Failed to generate a new parameter set")
             param1 = numpy.copy(self.parmat[self.index,1:][self.inferpar])
         return param1
 
@@ -686,7 +686,7 @@ class chainMCMC:
             self.parmat[self.index,1:] = param1
         # ---
         if self.print_iter and (self.step%self.print_iter)==0:
-            print "param.mat.chain: %d,%d,%s" %(self.step,self.chain_id,join(self.parmat[self.index,:],","))
+            print("param.mat.chain: %d,%d,%s" %(self.step,self.chain_id,join(self.parmat[self.index,:],",")))
         # ---
         if self.step>1:
             # --- 
@@ -699,7 +699,7 @@ class chainMCMC:
                 self.varmat[a,a] = EPS_VARMAT_MIN
         # --- 
         if self.print_iter and (self.step%self.print_iter)==0:
-            print "parMatAcc.chain: %s" %(join([self.step,self.chain_id,ldet(self.multi['cov'](self.parmat[:,1+self.inferpar])),ldet(self.varmat),numpy.mean(self.acc_vec),self.pulsevar],","))
+            print("parMatAcc.chain: %s" %(join([self.step,self.chain_id,ldet(self.multi['cov'](self.parmat[:,1+self.inferpar])),ldet(self.varmat),numpy.mean(self.acc_vec),self.pulsevar],",")))
 
     def iterateSingle(self):
         self.step += 1
@@ -727,7 +727,7 @@ class chainMCMC:
                 Abort("Iterate single failed with %g: %s" %(f0,join(param0,",")))
         # ---
         if self.print_iter and (self.step%self.print_iter)==0:
-            print "param.mat.chain: %d,%d,%s" %(self.step,self.chain_id,join(self.parmat[self.index,:],","))
+            print("param.mat.chain: %d,%d,%s" %(self.step,self.chain_id,join(self.parmat[self.index,:],",")))
         # ---
         if self.step>1:
             # --- 
@@ -744,7 +744,7 @@ class chainMCMC:
                         self.varmat[param_id,param_id] = tmp
         # --- 
         if self.print_iter and (self.step%self.print_iter)==0:
-            print "parMatAcc.chain: %s" %(join([self.step,self.chain_id,ldet(self.multi['cov'](self.parmat[:,1+self.inferpar])),ldet(self.varmat)],","))
-            print "parMatAcc.chain.accs: %d,%d,%s" %(self.step,self.chain_id,join([numpy.mean(acc_vec) for acc_vec in self.acc_vecs],","))
-            print "parMatAcc.chain.pulses: %d,%d,%s" %(self.step,self.chain_id,join(self.pulsevar,","))
+            print("parMatAcc.chain: %s" %(join([self.step,self.chain_id,ldet(self.multi['cov'](self.parmat[:,1+self.inferpar])),ldet(self.varmat)],",")))
+            print("parMatAcc.chain.accs: %d,%d,%s" %(self.step,self.chain_id,join([numpy.mean(acc_vec) for acc_vec in self.acc_vecs],",")))
+            print("parMatAcc.chain.pulses: %d,%d,%s" %(self.step,self.chain_id,join(self.pulsevar,",")))
 
