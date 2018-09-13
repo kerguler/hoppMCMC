@@ -1,16 +1,16 @@
 Metadata-Version: 1.1
 Name: hoppMCMC
-Version: 1.0
+Version: 1.1
 Summary: An adaptive basin-hopping Markov-chain Monte Carlo algorithm for Bayesian optimisation
 Home-page: https://github.com/kerguler/hoppMCMC
 Author: Kamil Erguler
 Author-email: k.erguler@cyi.ac.cy
 License: GPLv3
-Download-URL: https://github.com/kerguler/hoppMCMC/tarball/1.0
+Download-URL: https://github.com/kerguler/hoppMCMC/tarball/1.1
 Description: An adaptive basin-hopping Markov-chain Monte Carlo algorithm for Bayesian optimisation
         ======================================================================================
         
-        This is the python (v2.7) implementation of the hoppMCMC algorithm aiming to identify and sample from the high-probability regions of a posterior distribution. The algorithm combines three strategies: (i) parallel MCMC, (ii) adaptive Gibbs sampling and (iii) simulated annealing. Overall, hoppMCMC resembles the basin-hopping algorithm implemented in the optimize module of scipy, but it is developed for a wide range of modelling approaches including stochastic models with or without time-delay.
+        This is the python (v3.7) implementation of the hoppMCMC algorithm aiming to identify and sample from the high-probability regions of a posterior distribution. The algorithm combines three strategies: (i) parallel MCMC, (ii) adaptive Gibbs sampling and (iii) simulated annealing. Overall, hoppMCMC resembles the basin-hopping algorithm implemented in the optimize module of scipy, but it is developed for a wide range of modelling approaches including stochastic models with or without time-delay.
         
         Contents
         --------
@@ -67,6 +67,20 @@ Description: An adaptive basin-hopping Markov-chain Monte Carlo algorithm for Ba
         
         News
         ====
+        
+        1.1
+        -----
+        
+        *Release date: 13-Sep-2018*
+        
+        * Fixed a bug in reading output (Python 3)
+        
+        1.0
+        -----
+        
+        *Release date: 30-Jul-2018*
+        
+        * Compatible with Python 3
         
         0.6
         -----

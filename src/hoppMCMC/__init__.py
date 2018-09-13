@@ -74,7 +74,7 @@ class binfile():
         filesize = self.f.tell()
         self.f.seek(self.headsize)
         tmp=self.f.read(filesize-self.headsize)
-        ret=numpy.array(unpack('<'+'d'*((filesize-self.headsize)/self.bitsize),tmp),dtype=numpy.float64).reshape((((filesize-self.headsize)/self.bitsize)/self.rowsize,self.rowsize))
+        ret=numpy.array(unpack('<'+'d'*int(numpy.floor((filesize-self.headsize)/self.bitsize)),tmp),dtype=numpy.float64).reshape((int(numpy.floor(((filesize-self.headsize)/self.bitsize)/self.rowsize)),self.rowsize))
         return ret
     # ---
     def close(self):

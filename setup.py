@@ -5,7 +5,7 @@ here = os.path.abspath(os.path.dirname(__file__))
 README = open(os.path.join(here, 'README.txt')).read()
 NEWS = open(os.path.join(here, 'NEWS.txt')).read()
 
-version = '1.0'
+version = '1.1'
 
 # http://packages.python.org/distribute/setuptools.html#declaring-dependencies
 install_requires = [

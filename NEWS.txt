@@ -1,6 +1,13 @@
 News
 ====
 
+1.1
+-----
+
+*Release date: 13-Sep-2018*
+
+* Fixed a bug in reading output (Python 3)
+
 1.0
 -----
 
