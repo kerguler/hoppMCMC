@@ -141,10 +141,10 @@ def compareAUCs(parmats,groups,tol=1.0):
     counts = [numpy.sum(n==groups) for n in ids]
     try:
         kde = gaussian_kde(parmats[:,1:].T)
+        wt_list = numpy.array([[kde.evaluate(pr) for pr in parmat[:, 1:]] for parmat in parmat_list])
     except:
         print("Warning: Problem encountered in compareAUC!")
         return {ids[g]:0 for g in range(len(ids))}
-    wt_list = numpy.array([[kde.evaluate(pr) for pr in parmat[:,1:]] for parmat in parmat_list])
     mn = numpy.min(wt_list)
     wt_list = numpy.log(wt_list/mn)
     # Importance sampling for Monte Carlo integration:
@@ -161,11 +161,15 @@ def compareAUC(parmat0,parmat1,T):
     parmats = parmats[:,numpy.var(parmats,axis=0)!=0]
     try:
         kde = gaussian_kde(parmats[:,1:].T)
+        wt1 = numpy.array([kde.evaluate(pr) for pr in parmat1cp[:, 1:]])
     except:
         print("Warning: Problem encountered in compareAUC!")
         return {'acc':0, 'favg0':0, 'favg1':0}
-    wt0 = numpy.array([kde.evaluate(pr) for pr in parmat0cp[:,1:]])
-    wt1 = numpy.array([kde.evaluate(pr) for pr in parmat1cp[:,1:]])
+    try:
+        wt0 = numpy.array([kde.evaluate(pr) for pr in parmat0cp[:, 1:]])
+    except:
+        print("Warning: Problem encountered in compareAUC!")
+        return {'acc':1, 'favg0':0, 'favg1':0}
     mn = numpy.min([wt0,wt1])
     wt0 /= mn
     wt1 /= mn

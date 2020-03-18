@@ -1,12 +1,12 @@
 Metadata-Version: 1.1
 Name: hoppMCMC
-Version: 1.1
+Version: 1.2
 Summary: An adaptive basin-hopping Markov-chain Monte Carlo algorithm for Bayesian optimisation
 Home-page: https://github.com/kerguler/hoppMCMC
 Author: Kamil Erguler
 Author-email: k.erguler@cyi.ac.cy
 License: GPLv3
-Download-URL: https://github.com/kerguler/hoppMCMC/tarball/1.1
+Download-URL: https://github.com/kerguler/hoppMCMC/tarball/1.2
 Description: An adaptive basin-hopping Markov-chain Monte Carlo algorithm for Bayesian optimisation
         ======================================================================================
         
@@ -67,6 +67,13 @@ Description: An adaptive basin-hopping Markov-chain Monte Carlo algorithm for Ba
         
         News
         ====
+        
+        1.2
+        -----
+        
+        *UNRELEASED*
+        
+        * Prevented premature termination during kde.evaluate (needs a better solution)
         
         1.1
         -----

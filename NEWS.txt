@@ -1,6 +1,13 @@
 News
 ====
 
+1.2
+-----
+
+*UNRELEASED*
+
+* Prevented premature termination during kde.evaluate (needs a better solution)
+
 1.1
 -----
 
