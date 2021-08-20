@@ -1,11 +1,20 @@
 from setuptools import setup, find_packages
-import sys, os
+import sys, os, re
 
 here = os.path.abspath(os.path.dirname(__file__))
 README = open(os.path.join(here, 'README.txt')).read()
 NEWS = open(os.path.join(here, 'NEWS.txt')).read()
 
-version = '1.2'
+# -----------------------------------------------------------------
+
+verstrline = open('src/hoppMCMC/__init__.py', "rt").read()
+mo = re.search(r"^__version__ = ['\"]([^'\"]*)['\"]", verstrline, re.M)
+if mo:
+    version = mo.group(1)
+else:
+    raise RuntimeError("Unable to find version string!")
+
+# -----------------------------------------------------------------
 
 # http://packages.python.org/distribute/setuptools.html#declaring-dependencies
 install_requires = [
