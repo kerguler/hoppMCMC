@@ -530,7 +530,7 @@ class chainMCMC:
                        'rnorm': numpy.random.normal,
                        'det': abs}
         # ---
-        self.chain_id = chain_id;
+        self.chain_id = chain_id
         self.fitFun = fitFun
         self.parmat = numpy.array(param,dtype=numpy.float64,ndmin=1)
         self.varmat = numpy.array(varmat,dtype=numpy.float64,ndmin=2)
