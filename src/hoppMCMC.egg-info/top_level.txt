@@ -1,2 +1,4 @@
 hoppMCMC
 hoppMCMC/__init__
+hoppMCMC/inferfun
+hoppMCMC/mympi

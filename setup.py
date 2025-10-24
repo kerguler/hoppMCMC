@@ -40,5 +40,9 @@ setup(name='hoppMCMC',
     package_dir = {'': 'src'},include_package_data=True,
     zip_safe=False,
     install_requires=install_requires,
-    py_modules=['hoppMCMC/__init__']
+    py_modules=[
+        'hoppMCMC/__init__',
+        'hoppMCMC/mympi',
+        'hoppMCMC/inferfun'
+        ]
 )

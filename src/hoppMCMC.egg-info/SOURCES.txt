@@ -1,9 +1,12 @@
+LICENSE
 MANIFEST.in
 NEWS.txt
 README.txt
 setup.cfg
 setup.py
 src/hoppMCMC/__init__.py
+src/hoppMCMC/inferfun.py
+src/hoppMCMC/mympi.py
 src/hoppMCMC.egg-info/PKG-INFO
 src/hoppMCMC.egg-info/SOURCES.txt
 src/hoppMCMC.egg-info/dependency_links.txt
