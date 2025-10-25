@@ -1,2 +1,0 @@
-hoppMCMC
-hoppMCMC/__init__
