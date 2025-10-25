@@ -13,11 +13,11 @@ import sys
 import numpy
 from struct import *
 from scipy.stats import ttest_1samp as ttest
-import mympi
+import myMPI as myMPI
 
 def Abort(str):
     print("ERROR: "+str)
-    mympi.MPI.COMM_WORLD.Abort(1)
+    myMPI.MPI.COMM_WORLD.Abort(1)
 
 EPS_PULSE_VAR_MIN = 1e-12
 EPS_VARMAT_MIN = 1e-7
@@ -191,14 +191,14 @@ class hoppMCMC:
                  param,
                  varmat,
                  inferpar=None,
-                 gibbs=True,
                  num_hopp=3,
                  num_adapt=25,
                  num_chain=12,
                  chain_length=50,
                  rangeT=None,
                  model_comp=1000.0,
-                 outfilename=''):
+                 outfilename='',
+                 gibbs=True):
         """
                  
         Adaptive Basin-Hopping MCMC Algorithm
@@ -219,13 +219,6 @@ class hoppMCMC:
               an array of indexes of parameter dimensions to be inferred
               (all parameters are inferred by default)
               
-        gibbs:
-              indicates the type of chain iteration
-              True - Gibbs iteration where each parameter dimension has its own univariate
-                     Gaussian proposal distribution (default)
-              False - Metropolis-Hastings iteration where there is a single multivariate
-                     Gaussian proposal distribution
-
         num_hopp:
               number of hopp-steps (default=3)
 
@@ -263,7 +256,10 @@ class hoppMCMC:
                    score (f)
                    parameter values
               both files can be read using the readFile function
-                
+
+        gibbs:
+              for backward compatibility
+                              
         Returns
         -------
 
@@ -281,6 +277,71 @@ class hoppMCMC:
         the documentation (doc/hoppMCMC_manual.pdf) for more information and examples
                             
         """
+        #
+        self.fitFun = fitFun
+        #
+        if myMPI.MPI_RANK == myMPI.MPI_MASTER:
+            self.fun_master_init(param,
+                                 varmat,
+                                 inferpar,
+                                 num_hopp,
+                                 num_adapt,
+                                 num_chain,
+                                 chain_length,
+                                 rangeT,
+                                 model_comp,
+                                 outfilename)
+        #
+        myMPI.mpi(self.fun_master, self.fun_slave)
+        #
+    def fun_slave(self, mpi, task, opt):
+        chain_id = task[0]
+        param_id = task[1]
+        param1   = task[2]
+        f1 = self.fitFun(param1)
+        #
+        return [
+            chain_id,
+            param_id,
+            f1,
+            param1
+        ]
+        #
+    def fun_master(self, mpi, opt):
+        for hopp_step in range(self.num_hopp):
+            self.anneal = anneal_sigmasoft(self.rangeT[0],self.rangeT[1],self.num_adapt)
+            for adapt_step in range(self.num_adapt):
+                self.runAdaptStep(mpi, hopp_step*self.num_adapt+adapt_step)
+                test = {'acc':True, 'favg0':numpy.nan, 'favg1':numpy.nan} if len(self.parmats)==0 else compareAUC(self.parmats[-1][:,[0]+(1+self.inferpar).tolist()],self.parmat[:,[0]+(1+self.inferpar).tolist()],self.model_comp)
+                if test['acc']:
+                    self.parmats.append(self.parmat)
+                else:
+                    self.parmat = self.parmats[-1].copy()
+                    self.param = self.parmat[parMin(self.parmat)['i'],1:].copy()
+                # ---
+                if self.outfinal:
+                    self.outfinal.writeRow([hopp_step,test['acc'],test['favg0'],test['favg1']])
+                else:
+                    print("parMatAcc.final: %d,%s" %(hopp_step,join([test['acc'],test['favg0'],test['favg1']],",")))
+                # ---
+        if self.outparmat:
+            self.outparmat.close()
+        if self.outfinal:
+            self.outfinal.close()
+        #
+        mpi.clean()
+        #
+    def fun_master_init(self, 
+                        param,
+                        varmat,
+                        inferpar,
+                        num_hopp,
+                        num_adapt,
+                        num_chain,
+                        chain_length,
+                        rangeT,
+                        model_comp,
+                        outfilename):
         self.multi = {'cov': covariance,
                       'rnorm': numpy.random.multivariate_normal,
                       'det': numpy.linalg.det}
@@ -288,7 +349,6 @@ class hoppMCMC:
                        'rnorm': numpy.random.normal,
                        'det': abs}
         self.stat = self.multi
-        self.gibbs = gibbs
         self.num_hopp = num_hopp
         self.num_adapt = num_adapt
         self.num_chain = num_chain
@@ -296,7 +356,6 @@ class hoppMCMC:
         self.rangeT = numpy.sort([1.0,1000.0] if rangeT is None else rangeT)
         self.model_comp = model_comp
         # ---
-        self.fitFun = fitFun
         self.param = numpy.array(param,dtype=numpy.float64,ndmin=1)
         f0 = finalTest(self.fitFun,self.param)
         self.parmat = numpy.array([[f0]+self.param.tolist() for n in range(self.num_chain)],dtype=numpy.float64)
@@ -316,51 +375,56 @@ class hoppMCMC:
             self.outparmat = binfile(self.outfilename+'.parmat','w',self.parmat.shape[1]+3)
             self.outfinal = binfile(self.outfilename+'.final','w',4)
         # ---
-        for hopp_step in range(self.num_hopp):
-            self.anneal = anneal_sigmasoft(self.rangeT[0],self.rangeT[1],self.num_adapt)
-            for adapt_step in range(self.num_adapt):
-                self.runAdaptStep(hopp_step*self.num_adapt+adapt_step)
-                test = {'acc':True, 'favg0':numpy.nan, 'favg1':numpy.nan} if len(self.parmats)==0 else compareAUC(self.parmats[-1][:,[0]+(1+self.inferpar).tolist()],self.parmat[:,[0]+(1+self.inferpar).tolist()],self.model_comp)
-                if test['acc']:
-                    self.parmats.append(self.parmat)
-                else:
-                    self.parmat = self.parmats[-1].copy()
-                    self.param = self.parmat[parMin(self.parmat)['i'],1:].copy()
-                # ---
-                if self.outfinal:
-                    self.outfinal.writeRow([hopp_step,test['acc'],test['favg0'],test['favg1']])
-                else:
-                    print("parMatAcc.final: %d,%s" %(hopp_step,join([test['acc'],test['favg0'],test['favg1']],",")))
-                # ---
-        if self.outparmat:
-            self.outparmat.close()
-        if self.outfinal:
-            self.outfinal.close()
-
-    def runAdaptStep(self,adapt_step):
+    def runAdaptStep(self, mpi, adapt_step):
         pm = parMin(self.parmat)
         self.param = self.parmat[pm['i'],1:].copy()
         self.parmat = numpy.array([self.parmat[pm['i'],:].tolist() for n in range(self.num_chain)],dtype=numpy.float64)
         # ---
+        mcmcs = [
+            chainMCMC(self.fitFun,
+                      self.param,
+                      self.varmat,
+                      chain_id=chain_id,
+                      pulsevar=1.0,
+                      anneal=self.anneal[0],
+                      accthr=0.5,
+                      inferpar=self.inferpar,
+                      varmat_change=0,
+                      pulse_change=10,
+                      pulse_change_ratio=2,
+                      print_iter=0)
+            for chain_id in range(self.num_chain)
+        ]
+        # ---
+        for m in range(self.chain_length):
+            jobs = []
+            for chain_id in range(self.num_chain):
+                partest = mcmcs[chain_id].iterate()
+                for param_id, param1 in partest:
+                    jobs.append([
+                        chain_id, 
+                        param_id, 
+                        param1
+                    ])
+                    #
+            testouts = [[] for chain_id in range(self.num_chain)]
+            for ret in mpi.exec(jobs, multiple=True, verbose=False):
+                chain_id = ret[0]
+                param_id = ret[1]
+                f1       = ret[2]
+                param1   = ret[3]
+                testouts[chain_id].append([
+                    param_id, 
+                    f1, 
+                    param1
+                ])
+                #
+            for chain_id in range(self.num_chain):
+                mcmcs[chain_id].iterate(testouts[chain_id])
+                #
         for chain_id in range(self.num_chain):
-            # ---
-            mcmc = chainMCMC(self.fitFun,
-                             self.param,
-                             self.varmat,
-                             gibbs=self.gibbs,
-                             chain_id=chain_id,
-                             pulsevar=1.0,
-                             anneal=self.anneal[0],
-                             accthr=0.5,
-                             inferpar=self.inferpar,
-                             varmat_change=0,
-                             pulse_change=10,
-                             pulse_change_ratio=2,
-                             print_iter=0)
-            for m in range(self.chain_length):
-                mcmc.iterate()
-            self.parmat[chain_id,:] = mcmc.getParam()
-            # ---
+            self.parmat[chain_id,:] = mcmcs[chain_id].getParam()
+        # ---
         self.varmat = numpy.array(self.stat['cov'](self.parmat[:,1+self.inferpar]),ndmin=2)
         self.varmat[numpy.abs(self.varmat)<EPS_VARMAT_MIN] = 1.0
         # ---
@@ -382,7 +446,6 @@ class chainMCMC:
                  param,
                  varmat,
                  inferpar=None,
-                 gibbs=True,
                  chain_id=0,
                  pulsevar=1.0,
                  anneal=1,
@@ -402,8 +465,7 @@ class chainMCMC:
         Usage
         -----
 
-        Once created, a chainMCMC is iterated using the iterate method.
-        Depending on the value of gibbs, this method calls either iterateMulti or iterateSingle.
+        Once created, a chainMCMC is iterated using the iterate method, calling iterateCollective.
         
         Parameters
         ----------
@@ -421,13 +483,6 @@ class chainMCMC:
               an array of indexes of parameter dimensions to be inferred
               (all parameters are inferred by default)
               
-        gibbs:
-              indicates the type of chain iteration
-              True - Gibbs iteration where each parameter dimension has its own univariate
-                     Gaussian proposal distribution (default)
-              False - Metropolis-Hastings iteration where there is a single multivariate
-                     Gaussian proposal distribution
-
         chain_id:
               a chain identifier (default=0)
 
@@ -526,18 +581,10 @@ class chainMCMC:
         if self.varmat.shape and self.inferpar.shape[0] != self.varmat.shape[0]:
             Abort("Dimension mismatch in chainMCMC! inferpar.shape[0]=%d varmat.shape[0]=%d" %(self.inferpar.shape[0],self.varmat.shape[0]))
         # ---
-        self.gibbs = gibbs
-        if self.gibbs:
-            self.pulsevar = numpy.array(numpy.repeat(pulsevar,len(self.inferpar)),dtype=numpy.float64)
-            self.acc_vecs = [numpy.repeat(False,self.pulse_collect) for n in range(len(self.inferpar))]
-            self.iterate = self.iterateSingle
-        else:
-            self.pulsevar = pulsevar
-            self.acc_vec = numpy.repeat(False,self.pulse_collect)
-            self.iterate = self.iterateMulti
+        self.pulsevar = numpy.array(numpy.repeat(pulsevar,len(self.inferpar)),dtype=numpy.float64)
+        self.acc_vecs = [numpy.repeat(False,self.pulse_collect) for n in range(len(self.inferpar))]
+        self.iterate = self.iterateCollective
         self.pulsevar0 = self.pulsevar
-        if not self.gibbs and (self.parmat.shape[1]==2 or self.inferpar.shape[0]==1):
-            Abort("Please set gibbs=True!")
         self.varmat = self.varmat*self.pulsevar
         # ---
         self.halfa = 0.025
@@ -561,10 +608,7 @@ class chainMCMC:
         return ldet(self.varmat)
 
     def getAcc(self):
-        if self.gibbs:
-            return numpy.array([numpy.mean(acc_vec) for acc_vec in self.acc_vecs])
-        else:
-            return numpy.mean(self.acc_vec)
+        return numpy.array([numpy.mean(acc_vec) for acc_vec in self.acc_vecs])
 
     def setParam(self,parmat):
         self.parmat[self.index,:] = numpy.array(parmat,dtype=numpy.float64,ndmin=1).copy()
@@ -616,88 +660,6 @@ class chainMCMC:
         # --- Return default
         return self.pulse_nochange
 
-    def iterateMulti(self):
-        self.step += 1
-        # ---
-        acc = False
-        f0 = self.parmat[self.index,0]
-        param1 = numpy.copy(self.parmat[self.index,1:])
-        param1[self.inferpar] = self.newParamMulti()
-        f1 = self.fitFun(param1)
-        acc = self.checkMove(f0,f1)
-        # ---
-        self.index_acc = (self.index_acc+1)%self.pulse_collect
-        if acc:
-            self.index = (self.index+1)%self.varmat_collect
-        # ---
-        self.acc_vec[self.index_acc] = acc
-        if acc:
-            self.parmat[self.index,0] = f1
-            self.parmat[self.index,1:] = param1
-        # ---
-        if self.print_iter and (self.step%self.print_iter)==0:
-            print("param.mat.chain: %d,%d,%s" %(self.step,self.chain_id,join(self.parmat[self.index,:],",")))
-        # ---
-        if self.step>1:
-            # --- 
-            if self.pulse_change and (self.step%self.pulse_change)==0:
-                self.pulsevar = max(1e-7,self.pulsevar*self.pulsevarUpdate(self.acc_vec))
-            # --- 
-            if self.varmat_change and (self.step%self.varmat_change)==0:
-                self.varmat = numpy.array(self.multi['cov'](self.parmat[:,1+self.inferpar]),ndmin=2)
-                a = numpy.diag(self.varmat)<EPS_VARMAT_MIN
-                self.varmat[a,a] = EPS_VARMAT_MIN
-        # --- 
-        if self.print_iter and (self.step%self.print_iter)==0:
-            print("parMatAcc.chain: %s" %(join([self.step,self.chain_id,ldet(self.multi['cov'](self.parmat[:,1+self.inferpar])),ldet(self.varmat),numpy.mean(self.acc_vec),self.pulsevar],",")))
-
-    def iterateSingle(self):
-        self.step += 1
-        self.index_acc = (self.index_acc+1)%self.pulse_collect
-        # ---
-        acc_steps = False
-        f0 = self.parmat[self.index,0]
-        param0 = self.parmat[self.index,1:].copy()
-        for param_id in numpy.arange(len(self.inferpar)):
-            param1 = param0.copy()
-            param1[self.inferpar[param_id]] = self.newParamSingle(param1[self.inferpar[param_id]],param_id)
-            f1 = self.fitFun(param1)
-            acc = self.checkMove(f0,f1)
-            if acc:
-                acc_steps = True
-                f0 = f1
-                param0[self.inferpar[param_id]] = numpy.copy(param1[self.inferpar[param_id]])
-            self.acc_vecs[param_id][self.index_acc] = acc
-            # ---
-        if acc_steps:
-            self.index = (self.index+1)%self.varmat_collect
-            self.parmat[self.index,0] = f0
-            self.parmat[self.index,1:] = param0
-            if numpy.isnan(f0) or numpy.isinf(f0):
-                Abort("Iterate single failed with %g: %s" %(f0,join(param0,",")))
-        # ---
-        if self.print_iter and (self.step%self.print_iter)==0:
-            print("param.mat.chain: %d,%d,%s" %(self.step,self.chain_id,join(self.parmat[self.index,:],",")))
-        # ---
-        if self.step>1:
-            # --- 
-            if self.pulse_change and (self.step%self.pulse_change)==0:
-                for param_id in numpy.arange(len(self.inferpar)):
-                    tmp = min(self.pulse_max,max(self.pulse_min,self.pulsevar[param_id]*self.pulsevarUpdate(self.acc_vecs[param_id])))
-                    if numpy.abs(self.varmat[param_id,param_id]*tmp) >= EPS_PULSE_VAR_MIN:
-                        self.pulsevar[param_id] = tmp
-            # --- 
-            if self.varmat_change and (self.step%self.varmat_change)==0:
-                for param_id in numpy.arange(len(self.inferpar)):
-                    tmp = max(EPS_VARMAT_MIN,self.single['cov'](self.parmat[:,1+self.inferpar[param_id]]))
-                    if numpy.abs(tmp*self.pulsevar[param_id]) >= EPS_PULSE_VAR_MIN:
-                        self.varmat[param_id,param_id] = tmp
-        # --- 
-        if self.print_iter and (self.step%self.print_iter)==0:
-            print("parMatAcc.chain: %s" %(join([self.step,self.chain_id,ldet(self.multi['cov'](self.parmat[:,1+self.inferpar])),ldet(self.varmat)],",")))
-            print("parMatAcc.chain.accs: %d,%d,%s" %(self.step,self.chain_id,join([numpy.mean(acc_vec) for acc_vec in self.acc_vecs],",")))
-            print("parMatAcc.chain.pulses: %d,%d,%s" %(self.step,self.chain_id,join(self.pulsevar,",")))
-
     def iterateCollective(self, testout=[]):
         self.step += 1
         self.index_acc = (self.index_acc+1)%self.pulse_collect
@@ -711,14 +673,15 @@ class chainMCMC:
             for param_id in numpy.arange(len(self.inferpar)):
                 param1 = param0.copy()
                 param1[self.inferpar[param_id]] = self.newParamSingle(param1[self.inferpar[param_id]],param_id)
-                partest.append(param1)
+                partest.append([
+                    param_id, 
+                    param1
+                ])
             return partest
         else:
             partest = testout
         #
-        for param1 in partest:
-            f1 = self.fitFun(param1)
-        
+        for param_id, f1, param1 in partest:
             acc = self.checkMove(f0,f1)
             if acc:
                 acc_steps = True

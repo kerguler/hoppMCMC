@@ -33,7 +33,6 @@ results = hoppMCMC(fitness,            # define the objective function
                    param = [5.0,5.0],  # begin with x=5, y=5
                    varmat = [[1e-14,0],[0,1e-14]],
                                        # assign a low initial proposal variation
-                   gibbs = True,       # this is enforced for single-parameter runs
                    rangeT = [1,10],    # define the range of annealing temperature
                    model_comp = 10,    # tolerance for accepting hopp-steps
                    num_hopp = 10,      # run for 10 hopp-steps
