@@ -41,10 +41,10 @@ results = hoppMCMC(fitness,            # define the objective function
                    num_chain = 4,      # run with 4 parallel chains
                    chain_length = 10)  # each chain is 10 iterations long
 
-## This will plot the state of the chains at the end of each hopp-step
 if myMPI.MPI_RANK != myMPI.MPI_MASTER:
     sys.exit(0)
 
+## This will plot the state of the chains at the end of each hopp-step
 pylab.plot([0,10],[0,10],alpha=0)
 for n in range(len(results.parmats)):
     pylab.plot(repeat(n,4),results.parmats[n][:,1],'o')

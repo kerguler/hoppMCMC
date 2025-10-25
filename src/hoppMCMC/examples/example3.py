@@ -5,9 +5,11 @@ for sampling from different posterior modes of the drop wave function
 
 """
 
-from hoppMCMC import hoppMCMC, chainMCMC
+from hoppMCMC import hoppMCMC, chainMCMC, myMPI
 from numpy import cos,pi,exp,sqrt,Inf,isnan,array,cov,repeat
 import pylab
+import sys
+import time
 
 def dropwave(x,y):
   tmp = x**2+y**2
@@ -24,14 +26,23 @@ results = hoppMCMC(fitness,            # define the objective function
                    param = [5.0,5.0],  # begin with x=5, y=5
                    varmat = [[1e-14,0],[0,1e-14]],
                                        # assign a low initial proposal variation
-                   rangeT = [1,10],    # define the range of annealing temperature
+                   rangeT = [2,10],    # define the range of annealing temperature
                    model_comp = 10,    # tolerance for accepting hopp-steps
                    num_hopp = 1,       # run for only 1 hopp-step
                    num_adapt = 100,    # each hopp-step comprises 100 adaptation steps
                    num_chain = 4,      # run with 4 parallel chains
                    chain_length = 10)  # each chain is 10 iterations long
 
-parmat = array(results.parmats[0])
+if myMPI.MPI_RANK != myMPI.MPI_MASTER:
+    sys.exit(0)
+
+## This will plot the state of the chains at the end of each hopp-step
+pylab.plot([0,10],[0,10],alpha=0)
+for n in range(len(results.parmats)):
+    pylab.plot(repeat(n,4),results.parmats[n][:,1],'o')
+pylab.show()
+
+parmat = array(results.parmats[-1])
 param = parmat[parmat[:,0]==min(parmat[:,0]),1:][0]
 varmat = cov(parmat[:,1:],rowvar=False)
 
@@ -40,7 +51,6 @@ mcmc =   chainMCMC(fitness,            # define the objective function
                    param = param,      # begin with the optimum sample from results
                    varmat = varmat,    # assign an initial proposal variation
                    inferpar = [0,1],   # infer both x and y
-                   gibbs = True,       # this is enforced for single-parameter runs
                    chain_id = 0,       # chain identifier
                    pulsevar = 1,       # scaling factor for proposal variation
                    anneal = 1,         # annealing temperature
@@ -55,7 +65,7 @@ mcmc =   chainMCMC(fitness,            # define the objective function
 # while discarding the initial 5000 steps
 samples = []
 for m in range(10000):
-    mcmc.iterate()
+    mcmc.iterate(nompi=True)
     if m>5000 and m%25==0:
         samples.append(mcmc.getParam())
 samples = array(samples)

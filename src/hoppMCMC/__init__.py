@@ -291,6 +291,8 @@ class hoppMCMC:
                                  rangeT,
                                  model_comp,
                                  outfilename)
+            #
+            print("Optimum number of cores: %d" %((self.num_chain*len(self.inferpar))+1), flush=True)
         #
         myMPI.mpi(self.fun_master, self.fun_slave)
         #
@@ -679,14 +681,15 @@ class chainMCMC:
                 ])
                 #
             if nompi:
-                partest = []
+                testout = []
                 for param_id, param1 in partest:
                     f1 = self.fitFun(param1)
-                    partest.append([
+                    testout.append([
                         param_id,
                         f1,
                         param1
                     ])
+                partest = testout
             else:
                 return partest
         else:
