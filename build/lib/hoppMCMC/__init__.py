@@ -197,8 +197,7 @@ class hoppMCMC:
                  chain_length=50,
                  rangeT=None,
                  model_comp=1000.0,
-                 outfilename='',
-                 gibbs=True):
+                 outfilename=''):
         """
                  
         Adaptive Basin-Hopping MCMC Algorithm
@@ -256,10 +255,7 @@ class hoppMCMC:
                    score (f)
                    parameter values
               both files can be read using the readFile function
-
-        gibbs:
-              for backward compatibility
-                              
+                
         Returns
         -------
 
@@ -278,10 +274,9 @@ class hoppMCMC:
                             
         """
         #
-        self.fitFun = fitFun
-        #
         if myMPI.MPI_RANK == myMPI.MPI_MASTER:
-            self.fun_master_init(param,
+            self.fun_master_init(fitFun,
+                                 param,
                                  varmat,
                                  inferpar,
                                  num_hopp,
@@ -291,23 +286,20 @@ class hoppMCMC:
                                  rangeT,
                                  model_comp,
                                  outfilename)
-            #
-            print("Optimum number of cores: %d" %((self.num_chain*len(self.inferpar))+1), flush=True)
         #
-        myMPI.mpi(self.fun_master, self.fun_slave)
+        print("Here")
+        #myMPI.mpi(self.fun_master, self.fun_slave)
         #
     def fun_slave(self, mpi, task, opt):
-        chain_id = task['chain_id']
-        param_id = task['param_id']
-        param1   = task['param1']
+        chain_id = task[0]
+        param1   = task[1]
         f1 = self.fitFun(param1)
         #
-        return {
-            'chain_id': chain_id,
-            'param_id': param_id,
-            'f1': f1,
-            'param1': param1
-        }
+        return [
+            chain_id,
+            f1,
+            param1
+        ]
         #
     def fun_master(self, mpi, opt):
         for hopp_step in range(self.num_hopp):
@@ -334,6 +326,7 @@ class hoppMCMC:
         mpi.clean()
         #
     def fun_master_init(self, 
+                        fitFun,
                         param,
                         varmat,
                         inferpar,
@@ -358,6 +351,7 @@ class hoppMCMC:
         self.rangeT = numpy.sort([1.0,1000.0] if rangeT is None else rangeT)
         self.model_comp = model_comp
         # ---
+        self.fitFun = fitFun
         self.param = numpy.array(param,dtype=numpy.float64,ndmin=1)
         f0 = finalTest(self.fitFun,self.param)
         self.parmat = numpy.array([[f0]+self.param.tolist() for n in range(self.num_chain)],dtype=numpy.float64)
@@ -402,27 +396,21 @@ class hoppMCMC:
             jobs = []
             for chain_id in range(self.num_chain):
                 partest = mcmcs[chain_id].iterate()
-                for param_id, param1 in partest:
-                    jobs.append({
-                        'chain_id': chain_id, 
-                        'param_id': param_id, 
-                        'param1': param1
-                    })
+                for param1 in partest:
+                    jobs.append([
+                        chain_id, 
+                        param1
+                    ])
                     #
-            testouts = [[] for chain_id in range(self.num_chain)]
-            for ret in mpi.exec(jobs, multiple=True, verbose=False):
-                chain_id = ret['chain_id']
-                param_id = ret['param_id']
-                f1       = ret['f1']
-                param1   = ret['param1']
-                testouts[chain_id].append([
-                    param_id, 
-                    f1, 
-                    param1
-                ])
+            testouts = [[] for chain_id in self.num_chain]
+            for ret in mpi.exec(jobs, multiple=True, verbose=True):
+                chain_id = ret[0]
+                f1       = ret[1]
+                param1   = ret[2]
+                testouts[chain_id].append([f1, param1])
                 #
             for chain_id in range(self.num_chain):
-                mcmcs[chain_id].iterate(testout=testouts[chain_id])
+                mcmcs[chain_id].iterate(testouts[chain_id])
                 #
         for chain_id in range(self.num_chain):
             self.parmat[chain_id,:] = mcmcs[chain_id].getParam()
@@ -662,7 +650,7 @@ class chainMCMC:
         # --- Return default
         return self.pulse_nochange
 
-    def iterateCollective(self, testout=[], nompi=False):
+    def iterateCollective(self, testout=[]):
         self.step += 1
         self.index_acc = (self.index_acc+1)%self.pulse_collect
         # ---
@@ -675,27 +663,12 @@ class chainMCMC:
             for param_id in numpy.arange(len(self.inferpar)):
                 param1 = param0.copy()
                 param1[self.inferpar[param_id]] = self.newParamSingle(param1[self.inferpar[param_id]],param_id)
-                partest.append([
-                    param_id, 
-                    param1
-                ])
-                #
-            if nompi:
-                testout = []
-                for param_id, param1 in partest:
-                    f1 = self.fitFun(param1)
-                    testout.append([
-                        param_id,
-                        f1,
-                        param1
-                    ])
-                partest = testout
-            else:
-                return partest
+                partest.append(param1)
+            return partest
         else:
             partest = testout
         #
-        for param_id, f1, param1 in partest:
+        for f1, param1 in partest:
             acc = self.checkMove(f0,f1)
             if acc:
                 acc_steps = True

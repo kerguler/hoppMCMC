@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hoppMCMC"
+version = "2.0.0"
+description = "An adaptive basin-hopping Markov-chain Monte Carlo algorithm for Bayesian optimisation"
+authors = [{ name = "Kamil Erguler", email = "kerguler@gmail.com" }]
+license = { text = "GPLv3" }
+readme = "README.txt"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.22,<2.0",
+    "scipy>=1.10,<1.16",
+    "mpi4py>=3.1"
+]
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)"
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["hoppMCMC", "inferFun", "myMPI"]
+include-package-data = true
+zip-safe = false
