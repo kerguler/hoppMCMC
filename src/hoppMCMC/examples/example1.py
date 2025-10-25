@@ -5,7 +5,7 @@ for jumping between the two basins of attraction of 100*(x^2-1)^2
 
 """
 
-from hoppMCMC import hoppMCMC
+from hoppMCMC import hoppMCMC, myMPI
 from numpy import repeat
 import pylab
 
@@ -25,6 +25,7 @@ results = hoppMCMC(fitness,            # define the objective function
                    chain_length = 10)  # each chain is 10 iterations long
 
 # This will plot the state of the chains at the end of each hopp-step
-for n in range(len(results.parmats)):
-    pylab.plot(repeat(n,3),results.parmats[n][:,1],'o',c=["black","white"][n%2])
-pylab.show()
+if myMPI.MPI_RANK == myMPI.MPI_MASTER:
+    for n in range(len(results.parmats)):
+        pylab.plot(repeat(n,3),results.parmats[n][:,1],'o',c=["black","white"][n%2])
+    pylab.show()

@@ -5,9 +5,10 @@ for sampling from different posterior modes of the Langermann's function
 
 """
 
-from hoppMCMC import hoppMCMC, chainMCMC
+from hoppMCMC import hoppMCMC, chainMCMC, myMPI
 from numpy import cos,pi,exp,sqrt,Inf,isnan,array,cov,repeat
 import pylab
+import sys
 
 def langer(x,y):
 #   pyOpt: http://www.pyopt.org/examples/examples.autorefine.html
@@ -17,7 +18,7 @@ def langer(x,y):
     c = [1,2,5,3,5]
     
     f = 0.0
-    for i in xrange(5):
+    for i in range(5):
         f += -(c[i]*exp(-(1/pi)*((x-a[i])**2 + (y-b[i])**2))*cos(pi*((x-a[i])**2 + (y-b[i])**2)))
     
     return f
@@ -41,6 +42,9 @@ results = hoppMCMC(fitness,            # define the objective function
                    chain_length = 10)  # each chain is 10 iterations long
 
 ## This will plot the state of the chains at the end of each hopp-step
+if myMPI.MPI_RANK != myMPI.MPI_MASTER:
+    sys.exit(0)
+
 pylab.plot([0,10],[0,10],alpha=0)
 for n in range(len(results.parmats)):
     pylab.plot(repeat(n,4),results.parmats[n][:,1],'o')
@@ -58,7 +62,6 @@ mcmc =   chainMCMC(fitness,            # define the objective function
                    param = param,      # begin with the optimum sample from results
                    varmat = varmat,    # assign an initial proposal variation
                    inferpar = [0,1],   # infer both x and y
-                   gibbs = True,       # this is enforced for single-parameter runs
                    chain_id = 0,       # chain identifier
                    pulsevar = 1,       # scaling factor for proposal variation
                    anneal = 1,         # annealing temperature
@@ -73,7 +76,7 @@ mcmc =   chainMCMC(fitness,            # define the objective function
 # while discarding the initial 5000 steps
 samples = []
 for m in range(10000):
-    mcmc.iterate()
+    mcmc.iterate(nompi=True)
     if m>5000 and m%25==0:
         samples.append(mcmc.getParam())
 samples = array(samples)
