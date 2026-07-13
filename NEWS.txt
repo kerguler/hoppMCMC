@@ -1,74 +1,31 @@
 News
 ====
 
+2.1.0
+-----
+
+*Release date: 13-Jul-2026*
+
+inferFun is now updated to include ABCModel and inferABCModels as the main ABC-SMC inference tools
+
 1.2.1
------
-
-*UNRELEASED*
-
 1.2
+1.1 *13-Sep-2018*
+1.0 *30-Jul-2018*
+0.6
+0.5 *14-Feb-2017*
+0.4 *14-Oct-2015*
+0.3 *09-Oct-2015*
+0.2 *28-Sep-2015*
+0.1 *28-Sep-2015*
 -----
-
-*UNRELEASED*
 
 * Prevented premature termination during kde.evaluate (needs a better solution)
-
-1.1
------
-
-*Release date: 13-Sep-2018*
-
 * Fixed a bug in reading output (Python 3)
-
-1.0
------
-
-*Release date: 30-Jul-2018*
-
 * Compatible with Python 3
-
-0.6
------
-
-*UNRELEASED*
-
 * Print out the covariates in addition to the parameters
-
-0.5
------
-
-*Release date: 14-Feb-2017*
-
 * Minor improvement on pulsevarUpdate
-
-0.4
------
-
-*Release date: 14-Oct-2015*
-
 * Fixed an issue with default parameters
-
-0.3
------
-
-*Release date: 09-Oct-2015*
-
 * This version includes an improvement in compareAUCs
-
-
-0.2
------
-
-*Release date: 28-Sep-2015*
-
 * This version includes a documentation and examples
-
-
-0.1
------
-
-*Release date: 28-Sep-2015*
-
 * Initial commit
-
-
