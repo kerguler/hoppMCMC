@@ -477,64 +477,137 @@ class inferABCModels:
 
     def log_kernel_density(self, model_id, x, mean, kernel):
         inferpar = self.inferpars[model_id]
-
-        x_inf = x[inferpar]
-        mean_inf = mean[inferpar]
+        x_inf = numpy.asarray(x[inferpar], dtype=float)
+        mean_inf = numpy.asarray(mean[inferpar], dtype=float)
+        d = len(inferpar)
 
         kernel = numpy.asarray(kernel, dtype=float)
         if kernel.ndim == 0:
-            kernel = numpy.array([[kernel]])
-
-        # Add small jitter to avoid singular covariance problems.
-        kernel = kernel + numpy.eye(kernel.shape[0]) * self.jitter
-
-        eigvals, eigvecs = numpy.linalg.eigh(kernel)
-        if numpy.any(eigvals <= 0):
+            kernel = numpy.array([[float(kernel)]], dtype=float)
+        elif kernel.ndim == 1:
+            kernel = numpy.diag(kernel)
+        elif kernel.ndim != 2:
             raise ValueError(
-                f"Kernel is not positive definite for model {model_id} "
-                f"({self.model_names[model_id]}), even after jitter. "
-                f"Eigenvalues={eigvals}\nKernel:\n{kernel}"
+                f"Kernel for model {model_id} ({self.model_names[model_id]}) "
+                f"must be scalar, 1D, or 2D. Got shape {kernel.shape}."
             )
-
-        condition_number = eigvals[-1] / eigvals[0]
-        if condition_number > 1e10 and self.verbose:
-            smallest = numpy.argmin(eigvals)
-            bad_direction = eigvecs[:, smallest]
-            culprit_order = numpy.argsort(numpy.abs(bad_direction))[::-1]
-            print(
-                f"Warning: near-singular kernel for model {model_id} "
+        if kernel.shape != (d, d):
+            raise ValueError(
+                f"Kernel dimension mismatch for model {model_id} "
                 f"({self.model_names[model_id]}). "
-                f"condition_number={condition_number:g}, "
-                f"eigenvalues={eigvals}",
-                flush=True
+                f"Expected {(d, d)}, got {kernel.shape}. "
+                f"inferpar={inferpar}"
             )
-            print("  Dominant dimensions in smallest-eigenvalue direction:", flush=True)
-            for k in culprit_order:
+        if not numpy.all(numpy.isfinite(x_inf)):
+            raise ValueError(
+                f"Non-finite x values for model {model_id} "
+                f"({self.model_names[model_id]}): {x_inf}"
+            )
+        if not numpy.all(numpy.isfinite(mean_inf)):
+            raise ValueError(
+                f"Non-finite kernel mean for model {model_id} "
+                f"({self.model_names[model_id]}): {mean_inf}"
+            )
+        if not numpy.all(numpy.isfinite(kernel)):
+            raise ValueError(
+                f"Non-finite kernel entries for model {model_id} "
+                f"({self.model_names[model_id]}):\n{kernel}"
+            )
+        # Symmetrise, just in case floating-point noise introduced asymmetry.
+        kernel = 0.5 * (kernel + kernel.T)
+        diag = numpy.diag(kernel)
+        if numpy.any(diag < 0):
+            raise ValueError(
+                f"Negative diagonal variance in kernel for model {model_id} "
+                f"({self.model_names[model_id]}).\n"
+                f"Diagonal={diag}\n"
+                f"Kernel=\n{kernel}"
+            )
+        eigvals, eigvecs = numpy.linalg.eigh(kernel)
+        max_eig = numpy.max(eigvals)
+        # A purely absolute jitter may be too small if the largest variance is large.
+        # This floor is both absolute and relative.
+        eig_floor = max(self.jitter, self.jitter * max(1.0, max_eig))
+        if numpy.any(eigvals <= eig_floor):
+            bad = numpy.where(eigvals <= eig_floor)[0]
+            if self.verbose:
                 print(
-                    f"    kernel dim {k}, parameter index {inferpar[k]}, "
-                    f"loading={bad_direction[k]:g}, "
-                    f"variance={kernel[k, k]:g}",
+                    f"Warning: regularising near-singular kernel for model {model_id} "
+                    f"({self.model_names[model_id]}).",
                     flush=True
                 )
-
-        sd = numpy.sqrt(numpy.diag(kernel))
-        corr = kernel / numpy.outer(sd, sd)
-        if self.verbose:
-            print("  correlation matrix:", flush=True)
-            print(corr, flush=True)
-
-            high = numpy.where(numpy.abs(corr) > 0.98)
-
-            for a, b in zip(high[0], high[1]):
-                if a < b:
+                print(f"  parameter indices: {inferpar}", flush=True)
+                print(f"  diagonal variances: {diag}", flush=True)
+                print(f"  eigenvalues before regularisation: {eigvals}", flush=True)
+                print(f"  eigenvalue floor: {eig_floor:g}", flush=True)
+                #
+                for b in bad:
+                    direction = eigvecs[:, b]
+                    order = numpy.argsort(numpy.abs(direction))[::-1]
                     print(
-                        f"  high correlation: kernel dims {a}-{b}, "
-                        f"parameter indices {inferpar[a]}-{inferpar[b]}, "
-                        f"corr={corr[a, b]:g}",
+                        f"  problematic eigenvalue {b}: {eigvals[b]:g}",
                         flush=True
                     )
-
-        return multivariate_normal.logpdf(x_inf, mean=mean_inf, cov=kernel, allow_singular=False)
+                    print("  strongest dimensions in this direction:", flush=True)
+                    for k in order[:min(5, len(order))]:
+                        print(
+                            f"    kernel dim {k}, parameter index {inferpar[k]}, "
+                            f"loading={direction[k]:g}, "
+                            f"variance={diag[k]:g}",
+                            flush=True
+                        )
+            # Regularise eigenvalues, not only diagonal entries.
+            eigvals = numpy.maximum(eigvals, eig_floor)
+            kernel = eigvecs @ numpy.diag(eigvals) @ eigvecs.T
+            kernel = 0.5 * (kernel + kernel.T)
+        # Final check by Cholesky. This is stricter and clearer than waiting for SciPy.
+        try:
+            numpy.linalg.cholesky(kernel)
+        except numpy.linalg.LinAlgError as err:
+            eigvals_final = numpy.linalg.eigvalsh(kernel)
+            raise ValueError(
+                f"Kernel is still not positive definite for model {model_id} "
+                f"({self.model_names[model_id]}).\n"
+                f"parameter indices={inferpar}\n"
+                f"x={x_inf}\n"
+                f"mean={mean_inf}\n"
+                f"diagonal variances={numpy.diag(kernel)}\n"
+                f"eigenvalues={eigvals_final}\n"
+                f"kernel=\n{kernel}"
+            ) from err
+        try:
+            value = multivariate_normal.logpdf(
+                x_inf,
+                mean=mean_inf,
+                cov=kernel,
+                allow_singular=False
+            )
+        except Exception as err:
+            eigvals_final = numpy.linalg.eigvalsh(kernel)
+            raise ValueError(
+                f"multivariate_normal.logpdf failed for model {model_id} "
+                f"({self.model_names[model_id]}).\n"
+                f"parameter indices={inferpar}\n"
+                f"x={x_inf}\n"
+                f"mean={mean_inf}\n"
+                f"diagonal variances={numpy.diag(kernel)}\n"
+                f"eigenvalues={eigvals_final}\n"
+                f"kernel=\n{kernel}"
+            ) from err
+        if not numpy.isfinite(value):
+            eigvals_final = numpy.linalg.eigvalsh(kernel)
+            raise ValueError(
+                f"Non-finite kernel log density for model {model_id} "
+                f"({self.model_names[model_id]}).\n"
+                f"logpdf={value}\n"
+                f"parameter indices={inferpar}\n"
+                f"x={x_inf}\n"
+                f"mean={mean_inf}\n"
+                f"diagonal variances={numpy.diag(kernel)}\n"
+                f"eigenvalues={eigvals_final}\n"
+                f"kernel=\n{kernel}"
+            )
+        return value
 
     def calc_weights(self, mat_new, mat_old, kernels):
         """
