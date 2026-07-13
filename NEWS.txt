@@ -1,14 +1,13 @@
 News
 ====
 
-2.2.0
+2.2.1
 -----
 
 *Release date: 13-Jul-2026*
 
 inferFun is now updated to include ABCModel and inferABCModels as the main ABC-SMC inference tools
 
-2.1.0
 1.2.1
 1.2
 1.1 *13-Sep-2018*

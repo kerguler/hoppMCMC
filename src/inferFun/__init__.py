@@ -488,6 +488,52 @@ class inferABCModels:
         # Add small jitter to avoid singular covariance problems.
         kernel = kernel + numpy.eye(kernel.shape[0]) * self.jitter
 
+        eigvals, eigvecs = numpy.linalg.eigh(kernel)
+        if numpy.any(eigvals <= 0):
+            raise ValueError(
+                f"Kernel is not positive definite for model {model_id} "
+                f"({self.model_names[model_id]}), even after jitter. "
+                f"Eigenvalues={eigvals}\nKernel:\n{kernel}"
+            )
+
+        condition_number = eigvals[-1] / eigvals[0]
+        if condition_number > 1e10 and self.verbose:
+            smallest = numpy.argmin(eigvals)
+            bad_direction = eigvecs[:, smallest]
+            culprit_order = numpy.argsort(numpy.abs(bad_direction))[::-1]
+            print(
+                f"Warning: near-singular kernel for model {model_id} "
+                f"({self.model_names[model_id]}). "
+                f"condition_number={condition_number:g}, "
+                f"eigenvalues={eigvals}",
+                flush=True
+            )
+            print("  Dominant dimensions in smallest-eigenvalue direction:", flush=True)
+            for k in culprit_order:
+                print(
+                    f"    kernel dim {k}, parameter index {inferpar[k]}, "
+                    f"loading={bad_direction[k]:g}, "
+                    f"variance={kernel[k, k]:g}",
+                    flush=True
+                )
+
+        sd = numpy.sqrt(numpy.diag(kernel))
+        corr = kernel / numpy.outer(sd, sd)
+        if self.verbose:
+            print("  correlation matrix:", flush=True)
+            print(corr, flush=True)
+
+            high = numpy.where(numpy.abs(corr) > 0.98)
+
+            for a, b in zip(high[0], high[1]):
+                if a < b:
+                    print(
+                        f"  high correlation: kernel dims {a}-{b}, "
+                        f"parameter indices {inferpar[a]}-{inferpar[b]}, "
+                        f"corr={corr[a, b]:g}",
+                        flush=True
+                    )
+
         return multivariate_normal.logpdf(x_inf, mean=mean_inf, cov=kernel, allow_singular=False)
 
     def calc_weights(self, mat_new, mat_old, kernels):
