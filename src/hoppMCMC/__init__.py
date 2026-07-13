@@ -6,7 +6,7 @@ This is the python (v2.7) implementation of the hoppMCMC algorithm aiming to ide
 
 """
 
-__version__ = '2.2.2'
+__version__ = '2.2.3'
 
 import os
 import sys
