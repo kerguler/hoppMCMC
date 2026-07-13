@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hoppMCMC"
-version = "2.2.5"
+version = "2.2.4"
 description = "An adaptive basin-hopping Markov-chain Monte Carlo algorithm for Bayesian optimisation"
 authors = [{ name = "Kamil Erguler", email = "kerguler@gmail.com" }]
 license = { text = "GPLv3" }

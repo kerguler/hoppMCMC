@@ -139,65 +139,106 @@ class inferABCModels:
     """
     Multi-model Approximate Bayesian Computation with Sequential Monte Carlo.
 
-    Each particle contains both a model identity and a parameter vector.
-    The total population is shared across models, so models compete for
-    particles during inference.
+    `inferABCModels` performs ABC-SMC over a shared population of particles,
+    where each particle contains both a model identity and a parameter vector.
+    Models therefore compete for particles during inference.
+
+    This class is intended for ABC model comparison as well as parameter
+    inference. The posterior probability of a model is estimated by summing the
+    final particle weights belonging to that model.
 
     Parameters
     ----------
     models : list of ABCModel
         Models to compare.
 
+        Each model is defined by an `ABCModel` object containing its parameter
+        generator, distance function, bounds, prior model probability, and
+        optional kernel settings.
+
     epsseq : list of float
-        Sequence of ABC thresholds.
+        Sequence of ABC distance thresholds.
+
+        Particles are accepted when their distance is finite, non-negative,
+        and smaller than the current threshold.
+
+        Thresholds are used in order. Smaller thresholds usually impose a
+        stricter match to the observations.
 
     size : int
-        Total population size across all models, not per model.
+        Total population size across all models.
+
+        This is the total number of ABC particles, not the number of particles
+        per model. For example, if `size=300` and two models are supplied, the
+        final population contains 300 particles in total, distributed between
+        the two models according to their posterior support.
 
     niter : int
-        Number of ABC-SMC generations per threshold.
+        Number of ABC-SMC generations to perform at each threshold.
+
+        After every `niter` generations, the next value from `epsseq` is used.
 
     adapt : int
-        Frequency of model-specific kernel adaptation. If zero, kernels are
-        not adapted.
+        Frequency of proposal-kernel adaptation.
+
+        If `adapt > 0`, each model-specific kernel is adapted every `adapt`
+        generations using the empirical covariance of particles currently
+        assigned to that model.
+
+        If `adapt == 0`, kernels are not adapted.
 
     fmt : str, default="{:g}"
-        Format string for printed numerical output.
+        Format string used for printed numerical output.
 
     jitter : float, default=1e-8
-        Small variance floor used to avoid zero or singular kernels.
+        Small diagonal variance added to covariance matrices to reduce
+        numerical problems caused by singular or nearly singular proposal
+        kernels.
+
+        This is especially useful when the posterior is stiff in one or more
+        parameter directions.
 
     mcmc : float, default=-1
-        If negative, hard ABC acceptance is used. If positive, an MCMC-like
-        acceptance check is used.
+        Controls the acceptance rule.
+
+        If `mcmc < 0`, hard ABC acceptance is used:
+
+        accepted if `score < eps`.
+
+        If `mcmc > 0`, an MCMC-like acceptance rule is used in which proposals
+        with lower scores are always accepted and proposals with higher scores
+        may still be accepted with probability depending on `(old_score -
+        new_score) / mcmc`, provided the new score is below `eps`.
 
     retain : bool, default=False
-        If True, keep all generations in `results`.
+        If `False`, only the final particle population is kept in `result`.
 
-    kernel_mode : {"diagonal", "full"}, default="diagonal"
-        Determines how kernels are used for proposal and weight calculation.
+        If `True`, all generations are retained in `results`, allowing the
+        inference trajectory to be inspected after completion.
 
-        "diagonal":
-            Only the diagonal of the kernel is used. This is closest to the
-            original `inferABC` behaviour.
+    kernel_mode : string, default="diagonal"
+        If `diagonal`, proposals are diagonal multivariate normal
 
-        "full":
-            The full covariance matrix is used for proposal and density
-            calculation.
+        If `full`, proposals use the full covariance matrix
 
     verbose : bool, default=True
-        Print progress information.
+        If `True`, progress information, kernels, thresholds, and particle
+        matrices are printed during inference.
 
     Attributes
     ----------
     result : numpy.ndarray
-        Final particle matrix.
+        Final ABC particle population.
 
-    results : list
-        All retained generations if `retain=True`.
+        Each row corresponds to one particle. The columns are indexed by
+        `infocol` and contain generation number, model identity, particle
+        weight, simulation counts, ABC score, and parameter values.
+
+    results : list or numpy.ndarray
+        Retained generations, available when `retain=True`.
 
     model_names : list of str
-        Model names.
+        Names of the models supplied through `ABCModel`.
 
     model_priors : numpy.ndarray
         Normalised prior model probabilities.
@@ -207,6 +248,74 @@ class inferABCModels:
 
     infocol : dict
         Column indices for the particle matrix.
+
+        Typical entries are:
+
+        - `"iter"`: generation index;
+        - `"model"`: model index;
+        - `"weight"`: particle weight;
+        - `"fcount"`: failed simulation/proposal count;
+        - `"trials"`: number of proposal trials;
+        - `"score"`: ABC distance;
+        - `"param0"`: first parameter column.
+
+    Methods
+    -------
+    model_posterior()
+        Return posterior model probabilities by summing final particle weights
+        for each model.
+
+    Notes
+    -----
+    The usual workflow is:
+
+    >>> abc = inferABCModels(...)
+    >>> if myMPI.MPI_RANK == myMPI.MPI_MASTER:
+    ...     print(abc.model_posterior())
+
+    When running with MPI, only the master process should perform
+    post-processing and plotting.
+
+    Examples
+    --------
+    Define two models:
+
+    >>> model_exp = ABCModel(
+    ...     name="exponential",
+    ...     pargen=pargen_exponential,
+    ...     score=score_exponential,
+    ...     lower=lower_exp,
+    ...     upper=upper_exp,
+    ...     prior=0.5,
+    ...     inferpar=[0, 1],
+    ...     kernel=numpy.array([1e-4, 1e-4])
+    ... )
+
+    >>> model_briere = ABCModel(
+    ...     name="briere",
+    ...     pargen=pargen_briere,
+    ...     score=score_briere,
+    ...     lower=lower_briere,
+    ...     upper=upper_briere,
+    ...     prior=0.5,
+    ...     inferpar=[0, 1, 2],
+    ...     kernel=numpy.array([1e-8, 0.5, 0.5])
+    ... )
+
+    Run multi-model ABC-SMC:
+
+    >>> abc = inferABCModels(
+    ...     models=[model_exp, model_briere],
+    ...     epsseq=[2.0, 1.0, 0.5],
+    ...     size=300,
+    ...     niter=2,
+    ...     adapt=1
+    ... )
+
+    Summarise posterior model probabilities on the master process:
+
+    >>> if myMPI.MPI_RANK == myMPI.MPI_MASTER:
+    ...     print(abc.model_posterior())
     """
 
     def __init__(self,
@@ -221,25 +330,27 @@ class inferABCModels:
                  retain=False,
                  kernel_mode="diagonal",
                  verbose=True) -> None:
+        """
+        Initialise and run multi-model ABC-SMC.
+
+        See `help(inferABCModels)` for the full description of arguments,
+        attributes, and examples.
+        """
+
+        if kernel_mode not in ["diagonal", "full"]:
+            raise ValueError("kernel_mode must be either 'diagonal' or 'full'.")
+
+        self.kernel_mode = kernel_mode
 
         self.models = models
         self.nmodels = len(models)
 
-        if self.nmodels == 0:
-            raise ValueError("At least one model must be supplied.")
+        self.model_names = [m.name for m in models]
 
-        self.model_names = [m.name for m in self.models]
-
-        model_priors = numpy.array([m.prior for m in self.models], dtype=float)
-
-        if numpy.any(model_priors < 0):
-            raise ValueError("Model prior probabilities must be non-negative.")
-
-        if numpy.sum(model_priors) <= 0:
-            raise ValueError("At least one model prior must be positive.")
-
+        model_priors = numpy.array([m.prior for m in models], dtype=float)
         self.model_priors = model_priors / numpy.sum(model_priors)
 
+        # Determine parameter sizes.
         self.parsizes = []
         for m in self.models:
             pr = numpy.asarray(m.pargen(), dtype=float)
@@ -247,26 +358,19 @@ class inferABCModels:
 
         self.max_parsize = max(self.parsizes)
 
+        # Set default inferpar for each model.
         self.inferpars = []
-        for model_id, m in enumerate(self.models):
+        for k, m in enumerate(self.models):
             if m.inferpar is None:
-                self.inferpars.append(numpy.arange(self.parsizes[model_id]))
+                self.inferpars.append(numpy.arange(self.parsizes[k]))
             else:
                 self.inferpars.append(numpy.asarray(m.inferpar, dtype=int))
 
         self.infersizes = [len(x) for x in self.inferpars]
 
+        self.jitter = jitter if jitter>0.0 else 0.0
         self.fmt = fmt
-        self.jitter = float(jitter)
         self.mcmc = mcmc
-        self.retain = retain
-        self.verbose = verbose
-
-        if kernel_mode not in ["diagonal", "full"]:
-            raise ValueError("kernel_mode must be either 'diagonal' or 'full'.")
-
-        self.kernel_mode = kernel_mode
-
         self.check = self.checkMove if mcmc < 0.0 else self.checkMoveMCMC
 
         self.infocol = {
@@ -282,8 +386,9 @@ class inferABCModels:
         self.size = int(size)
         self.niter = int(niter)
         self.adapt = int(adapt)
-
+        self.verbose = verbose
         self.epsseq = list(epsseq)
+        self.retain = retain
 
         self.result = None
         self.results = []
@@ -291,123 +396,68 @@ class inferABCModels:
         mpi = mympi.mpi(self.function_master, self.function_slave)
         mpi.clean()
 
-    # ------------------------------------------------------------------
-    # Kernel handling
-    # ------------------------------------------------------------------
-
-    def prepare_kernel(self, model_id, kernel):
-        """
-        Convert a scalar, diagonal vector, or matrix into a valid covariance
-        matrix consistent with self.kernel_mode.
-        """
-
-        inferpar = self.inferpars[model_id]
-        d = len(inferpar)
+    def inferABC_kernel(self, abc, model_id, param0, kernel):
+        inferpar = abc.inferpars[model_id]
+        param1 = param0.copy()
 
         kernel = numpy.asarray(kernel, dtype=float)
-
         if kernel.ndim == 0:
-            kernel = numpy.eye(d) * float(kernel)
-
+            cov = numpy.array([[float(kernel)]])
         elif kernel.ndim == 1:
-            if len(kernel) != d:
-                raise ValueError(
-                    f"Kernel length mismatch for model {model_id} "
-                    f"({self.model_names[model_id]}). "
-                    f"Expected {d}, got {len(kernel)}."
-                )
-            kernel = numpy.diag(kernel)
-
-        elif kernel.ndim == 2:
-            if kernel.shape != (d, d):
-                raise ValueError(
-                    f"Kernel shape mismatch for model {model_id} "
-                    f"({self.model_names[model_id]}). "
-                    f"Expected {(d, d)}, got {kernel.shape}."
-                )
-            kernel = kernel.copy()
-
+            cov = numpy.diag(kernel)
         else:
-            raise ValueError(
-                f"Kernel for model {model_id} ({self.model_names[model_id]}) "
-                f"must be scalar, one-dimensional, or two-dimensional."
-            )
+            cov = kernel.copy()
 
-        if self.kernel_mode == "diagonal":
-            var = numpy.diag(kernel)
-            var = numpy.maximum(var, self.jitter)
-            kernel = numpy.diag(var)
-
+        if abc.kernel_mode == "diagonal":
+            cov = numpy.diag(numpy.maximum(numpy.diag(cov), abc.jitter))
         else:
-            kernel = 0.5 * (kernel + kernel.T)
+            cov = 0.5 * (cov + cov.T)
+            cov = cov + numpy.eye(cov.shape[0]) * abc.jitter
 
-            eigvals, eigvecs = numpy.linalg.eigh(kernel)
-
-            max_eig = numpy.max(eigvals)
-            eig_floor = max(self.jitter, self.jitter * max(1.0, max_eig))
-
-            eigvals = numpy.maximum(eigvals, eig_floor)
-
-            kernel = eigvecs @ numpy.diag(eigvals) @ eigvecs.T
-            kernel = 0.5 * (kernel + kernel.T)
-
-        return kernel
-
-    def inferABC_kernel(self, abc, model_id, param0, kernel):
-        """
-        Default proposal kernel.
-
-        The proposal distribution is consistent with `kernel_mode`.
-        """
-
-        inferpar = abc.inferpars[model_id]
-
-        param1 = param0.copy()
-        kernel = abc.prepare_kernel(model_id, kernel)
-
-        param1[inferpar] = numpy.random.multivariate_normal(
-            mean=param1[inferpar],
-            cov=kernel
-        )
-
+        param1[inferpar] = numpy.random.multivariate_normal(mean=param1[inferpar], cov=cov)
         return param1
+    
+    def get_param(self, row, model_id):
+        p0 = self.infocol["param0"]
+        psize = self.parsizes[model_id]
+        return numpy.asarray(row[p0:p0 + psize], dtype=float)
 
-    def log_kernel_density(self, model_id, x, mean, kernel):
-        """
-        Log density of the proposal kernel.
+    def in_bounds(self, model_id, pr):
+        m = self.models[model_id]
+        return numpy.all(pr >= m.lower) and numpy.all(pr <= m.upper)
 
-        This must match how proposals are generated in `inferABC_kernel`.
+    def logprior(self, model_id, pr):
         """
+        Parameter prior density.
+
+        If the model supplies logprior, use it.
+        Otherwise assume independent uniform priors over lower/upper
+        for the inferred parameters.
+
+        This matters for model selection when models have different
+        parameter dimensions or prior ranges.
+        """
+
+        m = self.models[model_id]
+
+        if m.logprior is not None:
+            return m.logprior(pr)
+        if not self.in_bounds(model_id, pr):
+            return -numpy.inf
 
         inferpar = self.inferpars[model_id]
+        width = m.upper[inferpar] - m.lower[inferpar]
 
-        x_inf = numpy.asarray(x[inferpar], dtype=float)
-        mean_inf = numpy.asarray(mean[inferpar], dtype=float)
+        if numpy.any(width <= 0):
+            return -numpy.inf
+        return -numpy.sum(numpy.log(width))
 
-        kernel = self.prepare_kernel(model_id, kernel)
-
-        if self.kernel_mode == "diagonal":
-            var = numpy.diag(kernel)
-            var = numpy.maximum(var, self.jitter)
-
-            return numpy.sum(
-                norm.logpdf(
-                    x_inf,
-                    loc=mean_inf,
-                    scale=numpy.sqrt(var)
-                )
-            )
-
-        return multivariate_normal.logpdf(
-            x_inf,
-            mean=mean_inf,
-            cov=kernel,
-            allow_singular=False
-        )
-
-    # ------------------------------------------------------------------
-    # Acceptance checks
-    # ------------------------------------------------------------------
+    def eval_score(self, model_id, pr):
+        scorefun = self.models[model_id].score
+        try:
+            return scorefun(pr, verbose=False)
+        except TypeError:
+            return scorefun(pr)
 
     def checkMove(self, f0, f1, eps):
         return (
@@ -429,61 +479,8 @@ class inferABCModels:
             )
         )
 
-    # ------------------------------------------------------------------
-    # Parameter, prior, and score helpers
-    # ------------------------------------------------------------------
-
-    def get_param(self, row, model_id):
-        p0 = self.infocol["param0"]
-        psize = self.parsizes[model_id]
-        return numpy.asarray(row[p0:p0 + psize], dtype=float)
-
-    def in_bounds(self, model_id, pr):
-        m = self.models[model_id]
-        return numpy.all(pr >= m.lower) and numpy.all(pr <= m.upper)
-
-    def logprior(self, model_id, pr):
-        """
-        Parameter log-prior density.
-
-        If the model supplies `logprior`, use it. Otherwise assume
-        independent uniform priors between lower and upper bounds for the
-        inferred parameters.
-        """
-
-        m = self.models[model_id]
-
-        if m.logprior is not None:
-            return m.logprior(pr)
-
-        if not self.in_bounds(model_id, pr):
-            return -numpy.inf
-
-        inferpar = self.inferpars[model_id]
-        width = m.upper[inferpar] - m.lower[inferpar]
-
-        if numpy.any(width <= 0):
-            return -numpy.inf
-
-        return -numpy.sum(numpy.log(width))
-
-    def eval_score(self, model_id, pr):
-        scorefun = self.models[model_id].score
-
-        try:
-            return scorefun(pr, verbose=False)
-        except TypeError:
-            return scorefun(pr)
-
-    # ------------------------------------------------------------------
-    # Sampling
-    # ------------------------------------------------------------------
-
     def sample_model_from_prior(self):
-        return numpy.random.choice(
-            numpy.arange(self.nmodels),
-            p=self.model_priors
-        )
+        return numpy.random.choice(numpy.arange(self.nmodels), p=self.model_priors)
 
     def sample_param(self, init, kernels, mat):
         if init:
@@ -491,42 +488,321 @@ class inferABCModels:
             pr = numpy.asarray(self.models[model_id].pargen(), dtype=float)
             scr = numpy.inf
             pr_new = pr.copy()
-
         else:
-            index_new = numpy.random.choice(
-                numpy.arange(mat.shape[0]),
-                size=1,
-                p=mat[:, self.infocol["weight"]],
-                replace=True
-            )[0]
-
+            index_new = numpy.random.choice(numpy.arange(mat.shape[0]), size=1, p=mat[:, self.infocol["weight"]], replace=True)[0]
             model_id = int(mat[index_new, self.infocol["model"]])
             pr = self.get_param(mat[index_new, :], model_id)
             scr = mat[index_new, self.infocol["score"]]
-
+            #
             m = self.models[model_id]
-
             if m.fun_kernel is None:
-                pr_new = self.inferABC_kernel(
-                    self,
-                    model_id,
-                    pr,
-                    kernels[model_id]
-                )
+                pr_new = self.inferABC_kernel(model_id, pr, kernels[model_id])
             else:
-                pr_new = m.fun_kernel(
-                    self,
-                    model_id,
-                    pr,
-                    kernels[model_id]
-                )
-
+                pr_new = m.fun_kernel(self, model_id, pr, kernels[model_id])
         return model_id, pr, scr, pr_new
 
-    # ------------------------------------------------------------------
-    # MPI slave
-    # ------------------------------------------------------------------
+    def log_kernel_density_diag(self, model_id, x, mean, kernel):
+        inferpar = self.inferpars[model_id]
 
+        x_inf = numpy.asarray(x[inferpar], dtype=float)
+        mean_inf = numpy.asarray(mean[inferpar], dtype=float)
+
+        kernel = numpy.asarray(kernel, dtype=float)
+        if kernel.ndim == 0:
+            var = numpy.repeat(float(kernel), len(inferpar))
+        elif kernel.ndim == 1:
+            var = kernel
+        else:
+            var = numpy.diag(kernel)
+        var = numpy.maximum(var, self.jitter)
+
+        return numpy.sum(
+            norm.logpdf(
+                x_inf,
+                loc=mean_inf,
+                scale=numpy.sqrt(var)
+            )
+        )
+
+    def log_kernel_density(self, model_id, x, mean, kernel):
+        inferpar = self.inferpars[model_id]
+
+        x_inf = numpy.asarray(x[inferpar], dtype=float)
+        mean_inf = numpy.asarray(mean[inferpar], dtype=float)
+
+        kernel = numpy.asarray(kernel, dtype=float)
+
+        if kernel.ndim == 0:
+            kernel = numpy.array([[float(kernel)]], dtype=float)
+        elif kernel.ndim == 1:
+            kernel = numpy.diag(kernel)
+
+        # Symmetrise to avoid tiny floating-point asymmetries
+        kernel = 0.5 * (kernel + kernel.T)
+
+        # Eigenvalue regularisation
+        eigvals, eigvecs = numpy.linalg.eigh(kernel)
+
+        max_eig = numpy.max(eigvals)
+        eig_floor = max(self.jitter, self.jitter * max(1.0, max_eig))
+
+        eigvals = numpy.maximum(eigvals, eig_floor)
+
+        kernel = eigvecs @ numpy.diag(eigvals) @ eigvecs.T
+        kernel = 0.5 * (kernel + kernel.T)
+
+        return multivariate_normal.logpdf(
+            x_inf,
+            mean=mean_inf,
+            cov=kernel,
+            allow_singular=False
+        )
+
+    def calc_weights(self, mat_new, mat_old, kernels):
+        """
+        ABC-SMC weights for particles with model identity.
+
+        For each new particle:
+
+            weight ∝ model_prior * parameter_prior_density
+                     / proposal_density_from_previous_population
+
+        The proposal density includes only previous particles with the
+        same model, because this version does not use cross-model jumps.
+        """
+
+        logw = numpy.full(self.size, -numpy.inf, dtype=float)
+        old_weights = mat_old[:, self.infocol["weight"]]
+
+        for i in range(self.size):
+            model_id = int(mat_new[i, self.infocol["model"]])
+            pr_new = self.get_param(mat_new[i, :], model_id)
+
+            numerator = (numpy.log(self.model_priors[model_id]) + self.logprior(model_id, pr_new))
+
+            terms = []
+            for j in range(mat_old.shape[0]):
+                old_model_id = int(mat_old[j, self.infocol["model"]])
+                if old_model_id != model_id:
+                    continue
+                if old_weights[j] <= 0:
+                    continue
+
+                pr_old = self.get_param(mat_old[j, :], old_model_id)
+                if self.kernel_mode == "diagonal":
+                    lk = self.log_kernel_density_diag(model_id, pr_new, pr_old, kernels[model_id])
+                else:
+                    lk = self.log_kernel_density(model_id, pr_new, pr_old, kernels[model_id])
+
+                terms.append(numpy.log(old_weights[j]) + lk)
+
+            if len(terms) == 0:
+                logw[i] = -numpy.inf
+            else:
+                logw[i] = numerator - logsumexp(terms)
+
+        normaliser = logsumexp(logw)
+        if numpy.isinf(normaliser):
+            raise ValueError("All particle weights are zero.")
+
+        weights = numpy.exp(logw - normaliser)
+        return weights
+    
+    def calc_kernel_init(self):
+        kernels = []
+        for model_id, m in enumerate(self.models):
+            inferpar = self.inferpars[model_id]
+            d = len(inferpar)
+            if m.kernel is None:
+                tmp = numpy.repeat(1e-6, d)
+            else:
+                tmp = numpy.asarray(m.kernel, dtype=float)
+            kernel = numpy.diag(tmp) if tmp.ndim == 1 else tmp
+            kernels.append(kernel)
+            self.print_kernel(model_id, kernel)
+        return kernels
+    
+    def calc_kernel_adapt(self, mat, iter, kernels, kernel_base):
+        if iter == 0 or self.adapt == 0 or iter % self.adapt > 0:
+            return kernels
+
+        new_kernels = [k.copy() for k in kernels]
+        for model_id in range(self.nmodels):
+            mask = mat[:, self.infocol["model"]] == model_id
+            # Need enough particles to estimate covariance.
+            if numpy.sum(mask) <= self.infersizes[model_id] + 1:
+                continue
+
+            inferpar = self.inferpars[model_id]
+            cols = self.infocol["param0"] + inferpar
+            x = mat[mask, :][:, cols]
+            tmp = numpy.cov(x.T)
+            if tmp.ndim == 0:
+                tmp = numpy.array([[tmp]])
+            if self.kernel_mode == "diagonal":
+                tmp = numpy.diag(numpy.diag(tmp))
+
+            # Keep diagonal variances above the initial kernel floor.
+            base = kernel_base[model_id]
+            a = numpy.diag_indices_from(tmp)
+            tmp[a] = numpy.maximum(tmp[a], base[a])
+            tmp[a] = numpy.maximum(tmp[a], self.jitter)
+
+            new_kernels[model_id] = tmp
+            self.print_kernel(model_id, tmp, iter)
+
+        return new_kernels
+    
+    def calc_mat_init(self, mpi, eps):
+        ncol = self.infocol["param0"] + self.max_parsize
+        mat = numpy.full((self.size, ncol), numpy.nan, dtype=numpy.float64)
+        return self.take_a_step(mpi, mat, 0, [], eps)
+
+    def take_a_step(self, mpi, mat, iter, kernels, eps):
+        ncol = self.infocol["param0"] + self.max_parsize
+        mat_new = numpy.full((self.size, ncol), numpy.nan, dtype=numpy.float64)
+
+        mat_new[:, self.infocol["weight"]] = 0.0
+        mat_new[:, self.infocol["fcount"]] = 0.0
+        mat_new[:, self.infocol["trials"]] = 0.0
+
+        jobs = [{
+            "mat": mat,
+            "index": index,
+            "init": iter == 0,
+            "kernels": kernels,
+            "eps": eps
+        } for index in numpy.arange(self.size)]
+
+        while len(jobs) > 0:
+            ret = mpi.exec(jobs, multiple=True)
+            jobs = []
+
+            for elm in ret:
+                idx = elm["index"]
+
+                mat_new[idx, self.infocol["trials"]] += 1
+                trials = mat_new[idx, self.infocol["trials"]]
+
+                if len(elm["pr_new"]):
+                    model_id = int(elm["model"])
+                    pr_new = numpy.asarray(elm["pr_new"], dtype=float)
+                    psize = self.parsizes[model_id]
+
+                    fcount = mat_new[idx, self.infocol["fcount"]]
+
+                    mat_new[idx, self.infocol["iter"]] = iter
+                    mat_new[idx, self.infocol["model"]] = model_id
+                    mat_new[idx, self.infocol["weight"]] = 1.0
+                    mat_new[idx, self.infocol["fcount"]] = fcount
+                    mat_new[idx, self.infocol["trials"]] = trials
+                    mat_new[idx, self.infocol["score"]] = elm["score"]
+
+                    p0 = self.infocol["param0"]
+                    mat_new[idx, p0:p0 + psize] = pr_new
+
+                    self.print_fcount(fcount, trials, idx)
+
+                else:
+                    mat_new[idx, self.infocol["fcount"]] += 1
+
+                    # If this particle has not yet been accepted, try again.
+                    if mat_new[idx, self.infocol["weight"]] == 0:
+                        ntrial = min(MPI_SIZE, int(trials) * 2)
+
+                        for n in range(ntrial):
+                            jobs.append({
+                                "mat": mat,
+                                "index": idx,
+                                "init": iter == 0,
+                                "kernels": kernels,
+                                "eps": eps
+                            })
+
+        if iter == 0:
+            mat_new[:, self.infocol["weight"]] = 1.0 / self.size
+        else:
+            mat_new[:, self.infocol["weight"]] = self.calc_weights(mat_new, mat, kernels)
+
+        return mat_new
+
+    def model_posterior(self, mat=None):
+        if mat is None:
+            mat = self.result
+
+        if mat is None:
+            raise ValueError("No ABC result available.")
+
+        rows = []
+        for model_id, name in enumerate(self.model_names):
+            mask = mat[:, self.infocol["model"]] == model_id
+            rows.append({
+                "model_id": model_id,
+                "model": name,
+                "n_particles": int(numpy.sum(mask)),
+                "posterior_probability": numpy.sum(
+                    mat[mask, self.infocol["weight"]]
+                )
+            })
+
+        out = pandas.DataFrame(rows)
+        total = out["posterior_probability"].sum()
+        if total > 0:
+            out["posterior_probability"] /= total
+
+        return out.sort_values("posterior_probability", ascending=False).reset_index(drop=True)
+    
+    def print_kernel(self, model_id, kernel, iter=0):
+        if self.verbose:
+            name = self.model_names[model_id]
+            print(
+                "kernel.sd: "
+                + str(iter)
+                + ","
+                + name
+                + ","
+                + ",".join([
+                    self.fmt.format(m)
+                    for m in numpy.diagonal(kernel)
+                ]),
+                flush=True
+            )
+
+    def print_mat(self, mat, eps, iter=0):
+        if self.verbose:
+            print(
+                "param.mat: "
+                + self.fmt.format(eps)
+                + ","
+                + ("\nparam.mat: " + self.fmt.format(eps) + ",").join([
+                    ",".join([
+                        self.fmt.format(mm) if not numpy.isnan(mm) else "nan"
+                        for mm in m
+                    ])
+                    for m in mat
+                ]),
+                flush=True
+            )
+
+    def print_eps(self, eps, iter=0):
+        if self.verbose:
+            print("EPS:", eps, flush=True)
+
+    def print_fcount(self, fcount, trials, index):
+        if self.verbose:
+            print(
+                "Matrix: %d (%s / %s)"
+                % (index, self.fmt.format(fcount), self.fmt.format(trials)),
+                flush=True
+            )
+
+    def calc_get_eps(self):
+        eps = None
+        if len(self.epsseq):
+            eps = self.epsseq.pop(0)
+            self.print_eps(eps)
+        return eps
+    
     def function_slave(self, mpi, cmd, opt={}):
         mat = cmd["mat"]
         index = cmd["index"]
@@ -535,12 +811,7 @@ class inferABCModels:
         eps = cmd["eps"]
 
         while True:
-            model_id, pr, scr, pr_new = self.sample_param(
-                init,
-                kernels,
-                mat
-            )
-
+            model_id, pr, scr, pr_new = self.sample_param(init, kernels, mat)
             if self.in_bounds(model_id, pr_new):
                 break
 
@@ -562,308 +833,7 @@ class inferABCModels:
             "init": init,
             "pr_new": []
         }
-
-    # ------------------------------------------------------------------
-    # Printing helpers
-    # ------------------------------------------------------------------
-
-    def print_kernel(self, model_id, kernel, iter=0):
-        if self.verbose:
-            print(
-                "kernel.var: "
-                + str(iter)
-                + ","
-                + self.model_names[model_id]
-                + ","
-                + ",".join([
-                    self.fmt.format(m)
-                    for m in numpy.diagonal(kernel)
-                ]),
-                flush=True
-            )
-
-    def print_mat(self, mat, eps, iter=0):
-        if self.verbose:
-            prefix = "param.mat: " + self.fmt.format(eps) + ","
-
-            print(
-                prefix
-                + ("\n" + prefix).join([
-                    ",".join([
-                        self.fmt.format(mm) if numpy.isfinite(mm) else "nan"
-                        for mm in m
-                    ])
-                    for m in mat
-                ]),
-                flush=True
-            )
-
-    def print_eps(self, eps, iter=0):
-        if self.verbose:
-            print("EPS:", eps, flush=True)
-
-    def print_fcount(self, fcount, trials, index):
-        if self.verbose:
-            print(
-                "Matrix: %d (%s / %s)"
-                % (index, self.fmt.format(fcount), self.fmt.format(trials)),
-                flush=True
-            )
-
-    # ------------------------------------------------------------------
-    # Kernels and thresholds
-    # ------------------------------------------------------------------
-
-    def calc_kernel_init(self):
-        kernels = []
-
-        for model_id, m in enumerate(self.models):
-            inferpar = self.inferpars[model_id]
-            d = len(inferpar)
-
-            if m.kernel is None:
-                tmp = numpy.repeat(1e-6, d)
-            else:
-                tmp = numpy.asarray(m.kernel, dtype=float)
-
-            kernel = numpy.diag(tmp) if tmp.ndim == 1 else tmp
-            kernel = self.prepare_kernel(model_id, kernel)
-
-            kernels.append(kernel)
-
-            self.print_kernel(model_id, kernel)
-
-        return kernels
-
-    def calc_kernel_adapt(self, mat, iter, kernels, kernel_base):
-        if iter == 0 or self.adapt == 0 or iter % self.adapt > 0:
-            return kernels
-
-        new_kernels = [k.copy() for k in kernels]
-
-        for model_id in range(self.nmodels):
-            mask = mat[:, self.infocol["model"]] == model_id
-
-            if numpy.sum(mask) <= self.infersizes[model_id] + 1:
-                continue
-
-            inferpar = self.inferpars[model_id]
-            cols = self.infocol["param0"] + inferpar
-
-            x = mat[mask, :][:, cols]
-
-            tmp = numpy.cov(x.T)
-
-            if tmp.ndim == 0:
-                tmp = numpy.array([[tmp]])
-
-            if self.kernel_mode == "diagonal":
-                tmp = numpy.diag(numpy.diag(tmp))
-
-            base = kernel_base[model_id]
-
-            if self.kernel_mode == "diagonal":
-                base = numpy.diag(numpy.diag(base))
-
-            a = numpy.diag_indices_from(tmp)
-
-            tmp[a] = numpy.maximum(tmp[a], base[a])
-            tmp[a] = numpy.maximum(tmp[a], self.jitter)
-
-            tmp = self.prepare_kernel(model_id, tmp)
-
-            new_kernels[model_id] = tmp
-            self.print_kernel(model_id, tmp, iter)
-
-        return new_kernels
-
-    def calc_get_eps(self):
-        eps = None
-
-        if len(self.epsseq):
-            eps = self.epsseq.pop(0)
-            self.print_eps(eps)
-
-        return eps
-
-    # ------------------------------------------------------------------
-    # Matrix initialisation
-    # ------------------------------------------------------------------
-
-    def calc_mat_init(self, mpi, eps):
-        ncol = self.infocol["param0"] + self.max_parsize
-
-        mat = numpy.full(
-            (self.size, ncol),
-            numpy.nan,
-            dtype=numpy.float64
-        )
-
-        return self.take_a_step(mpi, mat, 0, [], eps)
-
-    # ------------------------------------------------------------------
-    # Weight calculation
-    # ------------------------------------------------------------------
-
-    def calc_weights(self, mat_new, mat_old, kernels):
-        """
-        ABC-SMC weights for the new particle population.
-
-        For each new particle:
-
-            weight ∝ model_prior × parameter_prior_density
-                     / proposal_density
-
-        The proposal density is the mixture of previous particles of the same
-        model, using the previous generation weights and the same kernel used
-        to generate the new particle.
-        """
-
-        logw = numpy.full(self.size, -numpy.inf, dtype=float)
-
-        old_weights = mat_old[:, self.infocol["weight"]]
-
-        for i in range(self.size):
-            model_id = int(mat_new[i, self.infocol["model"]])
-            pr_new = self.get_param(mat_new[i, :], model_id)
-
-            log_model_prior = numpy.log(self.model_priors[model_id])
-            log_param_prior = self.logprior(model_id, pr_new)
-
-            numerator = log_model_prior + log_param_prior
-
-            if not numpy.isfinite(numerator):
-                logw[i] = -numpy.inf
-                continue
-
-            terms = []
-
-            for j in range(mat_old.shape[0]):
-                old_model_id = int(mat_old[j, self.infocol["model"]])
-
-                if old_model_id != model_id:
-                    continue
-
-                if old_weights[j] <= 0:
-                    continue
-
-                pr_old = self.get_param(mat_old[j, :], old_model_id)
-
-                lk = self.log_kernel_density(
-                    model_id,
-                    pr_new,
-                    pr_old,
-                    kernels[model_id]
-                )
-
-                if numpy.isfinite(lk):
-                    terms.append(numpy.log(old_weights[j]) + lk)
-
-            if len(terms) == 0:
-                logw[i] = -numpy.inf
-            else:
-                denominator = logsumexp(terms)
-                logw[i] = numerator - denominator
-
-        normaliser = logsumexp(logw)
-
-        if not numpy.isfinite(normaliser):
-            raise ValueError(
-                "All particle weights are zero or non-finite. "
-                "Check kernels, priors, model particle counts, and bounds."
-            )
-
-        weights = numpy.exp(logw - normaliser)
-
-        return weights
-
-    # ------------------------------------------------------------------
-    # One ABC-SMC generation
-    # ------------------------------------------------------------------
-
-    def take_a_step(self, mpi, mat, iter, kernels, eps):
-        ncol = self.infocol["param0"] + self.max_parsize
-
-        mat_new = numpy.full(
-            (self.size, ncol),
-            numpy.nan,
-            dtype=numpy.float64
-        )
-
-        mat_new[:, self.infocol["weight"]] = 0.0
-        mat_new[:, self.infocol["fcount"]] = 0.0
-        mat_new[:, self.infocol["trials"]] = 0.0
-
-        jobs = [{
-            "mat": mat,
-            "index": index,
-            "init": iter == 0,
-            "kernels": kernels,
-            "eps": eps
-        } for index in numpy.arange(self.size)]
-
-        mpi_size = getattr(mympi, "MPI_SIZE", 1)
-
-        while len(jobs) > 0:
-            ret = mpi.exec(jobs, multiple=True)
-            jobs = []
-
-            for elm in ret:
-                idx = elm["index"]
-
-                mat_new[idx, self.infocol["trials"]] += 1
-                trials = mat_new[idx, self.infocol["trials"]]
-
-                if len(elm["pr_new"]):
-                    model_id = int(elm["model"])
-                    pr_new = numpy.asarray(elm["pr_new"], dtype=float)
-
-                    psize = self.parsizes[model_id]
-                    p0 = self.infocol["param0"]
-
-                    fcount = mat_new[idx, self.infocol["fcount"]]
-
-                    mat_new[idx, self.infocol["iter"]] = iter
-                    mat_new[idx, self.infocol["model"]] = model_id
-                    mat_new[idx, self.infocol["weight"]] = 1.0
-                    mat_new[idx, self.infocol["fcount"]] = fcount
-                    mat_new[idx, self.infocol["trials"]] = trials
-                    mat_new[idx, self.infocol["score"]] = elm["score"]
-
-                    mat_new[idx, p0:p0 + psize] = pr_new
-
-                    self.print_fcount(fcount, trials, idx)
-
-                else:
-                    mat_new[idx, self.infocol["fcount"]] += 1
-
-                    if mat_new[idx, self.infocol["weight"]] == 0:
-                        ntrial = min(mpi_size, int(trials) * 2)
-
-                        for _ in range(ntrial):
-                            jobs.append({
-                                "mat": mat,
-                                "index": idx,
-                                "init": iter == 0,
-                                "kernels": kernels,
-                                "eps": eps
-                            })
-
-        if iter == 0:
-            mat_new[:, self.infocol["weight"]] = 1.0 / self.size
-        else:
-            mat_new[:, self.infocol["weight"]] = self.calc_weights(
-                mat_new,
-                mat,
-                kernels
-            )
-
-        return mat_new
-
-    # ------------------------------------------------------------------
-    # MPI master
-    # ------------------------------------------------------------------
-
+    
     def function_master(self, mpi, opt={}):
         eps = self.calc_get_eps()
 
@@ -873,28 +843,18 @@ class inferABCModels:
         kernel_base = [k.copy() for k in kernels]
 
         iter = 0
-
         self.print_mat(mat, eps, iter)
-
-        if self.retain:
-            self.results.append(mat.copy())
 
         while True:
             iter += 1
 
             mat = self.take_a_step(mpi, mat, iter, kernels, eps)
 
-            kernels = self.calc_kernel_adapt(
-                mat,
-                iter,
-                kernels,
-                kernel_base
-            )
+            kernels = self.calc_kernel_adapt(mat, iter, kernels, kernel_base)
 
             self.print_mat(mat, eps, iter)
-
             if self.retain:
-                self.results.append(mat.copy())
+                self.results.append(mat)
 
             if iter % self.niter == 0:
                 eps = self.calc_get_eps()
@@ -903,52 +863,8 @@ class inferABCModels:
                     break
 
         self.result = mat
-
+        self.results = numpy.vstack(self.results)
         return mat
-
-    # ------------------------------------------------------------------
-    # Summaries
-    # ------------------------------------------------------------------
-
-    def model_posterior(self, mat=None):
-        """
-        Summarise posterior model probabilities.
-
-        The posterior probability of a model is calculated as the sum of final
-        particle weights assigned to that model.
-        """
-
-        if mat is None:
-            mat = self.result
-
-        if mat is None:
-            raise ValueError("No ABC result available.")
-
-        rows = []
-
-        for model_id, name in enumerate(self.model_names):
-            mask = mat[:, self.infocol["model"]] == model_id
-
-            rows.append({
-                "model_id": model_id,
-                "model": name,
-                "n_particles": int(numpy.sum(mask)),
-                "posterior_probability": numpy.sum(
-                    mat[mask, self.infocol["weight"]]
-                )
-            })
-
-        out = pandas.DataFrame(rows)
-
-        total = out["posterior_probability"].sum()
-
-        if total > 0:
-            out["posterior_probability"] /= total
-
-        return out.sort_values(
-            "posterior_probability",
-            ascending=False
-        ).reset_index(drop=True)
 
 # https://darrenjw.wordpress.com/2010/08/15/metropolis-hastings-mcmc-algorithms/
 def mcmc(pr,fun,lower,upper,kernel,niter=1000,thin=10,sig=1.0,verbose=False):
