@@ -216,11 +216,6 @@ class inferABCModels:
         If `True`, all generations are retained in `results`, allowing the
         inference trajectory to be inspected after completion.
 
-    kernel_mode : string, default="diagonal"
-        If `diagonal`, proposals are diagonal multivariate normal
-
-        If `full`, proposals use the full covariance matrix
-
     verbose : bool, default=True
         If `True`, progress information, kernels, thresholds, and particle
         matrices are printed during inference.
@@ -328,7 +323,6 @@ class inferABCModels:
                  jitter=1e-8,
                  mcmc=-1,
                  retain=False,
-                 kernel_mode="diagonal",
                  verbose=True) -> None:
         """
         Initialise and run multi-model ABC-SMC.
@@ -336,11 +330,6 @@ class inferABCModels:
         See `help(inferABCModels)` for the full description of arguments,
         attributes, and examples.
         """
-
-        if kernel_mode not in ["diagonal", "full"]:
-            raise ValueError("kernel_mode must be either 'diagonal' or 'full'.")
-
-        self.kernel_mode = kernel_mode
 
         self.models = models
         self.nmodels = len(models)
@@ -396,25 +385,10 @@ class inferABCModels:
         mpi = mympi.mpi(self.function_master, self.function_slave)
         mpi.clean()
 
-    def inferABC_kernel(self, abc, model_id, param0, kernel):
-        inferpar = abc.inferpars[model_id]
+    def inferABC_kernel(self, model_id, param0, kernel):
+        inferpar = self.inferpars[model_id]
         param1 = param0.copy()
-
-        kernel = numpy.asarray(kernel, dtype=float)
-        if kernel.ndim == 0:
-            cov = numpy.array([[float(kernel)]])
-        elif kernel.ndim == 1:
-            cov = numpy.diag(kernel)
-        else:
-            cov = kernel.copy()
-
-        if abc.kernel_mode == "diagonal":
-            cov = numpy.diag(numpy.maximum(numpy.diag(cov), abc.jitter))
-        else:
-            cov = 0.5 * (cov + cov.T)
-            cov = cov + numpy.eye(cov.shape[0]) * abc.jitter
-
-        param1[inferpar] = numpy.random.multivariate_normal(mean=param1[inferpar], cov=cov)
+        param1[inferpar] = numpy.random.multivariate_normal(mean=param1[inferpar], cov=kernel)
         return param1
     
     def get_param(self, row, model_id):
@@ -501,29 +475,6 @@ class inferABCModels:
                 pr_new = m.fun_kernel(self, model_id, pr, kernels[model_id])
         return model_id, pr, scr, pr_new
 
-    def log_kernel_density_diag(self, model_id, x, mean, kernel):
-        inferpar = self.inferpars[model_id]
-
-        x_inf = numpy.asarray(x[inferpar], dtype=float)
-        mean_inf = numpy.asarray(mean[inferpar], dtype=float)
-
-        kernel = numpy.asarray(kernel, dtype=float)
-        if kernel.ndim == 0:
-            var = numpy.repeat(float(kernel), len(inferpar))
-        elif kernel.ndim == 1:
-            var = kernel
-        else:
-            var = numpy.diag(kernel)
-        var = numpy.maximum(var, self.jitter)
-
-        return numpy.sum(
-            norm.logpdf(
-                x_inf,
-                loc=mean_inf,
-                scale=numpy.sqrt(var)
-            )
-        )
-
     def log_kernel_density(self, model_id, x, mean, kernel):
         inferpar = self.inferpars[model_id]
 
@@ -589,10 +540,7 @@ class inferABCModels:
                     continue
 
                 pr_old = self.get_param(mat_old[j, :], old_model_id)
-                if self.kernel_mode == "diagonal":
-                    lk = self.log_kernel_density_diag(model_id, pr_new, pr_old, kernels[model_id])
-                else:
-                    lk = self.log_kernel_density(model_id, pr_new, pr_old, kernels[model_id])
+                lk = self.log_kernel_density(model_id, pr_new, pr_old, kernels[model_id])
 
                 terms.append(numpy.log(old_weights[j]) + lk)
 
@@ -639,14 +587,11 @@ class inferABCModels:
             tmp = numpy.cov(x.T)
             if tmp.ndim == 0:
                 tmp = numpy.array([[tmp]])
-            if self.kernel_mode == "diagonal":
-                tmp = numpy.diag(numpy.diag(tmp))
 
             # Keep diagonal variances above the initial kernel floor.
             base = kernel_base[model_id]
             a = numpy.diag_indices_from(tmp)
             tmp[a] = numpy.maximum(tmp[a], base[a])
-            tmp[a] = numpy.maximum(tmp[a], self.jitter)
 
             new_kernels[model_id] = tmp
             self.print_kernel(model_id, tmp, iter)
