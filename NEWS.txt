@@ -1,13 +1,14 @@
 News
 ====
 
-2.2.6
+2.2.7
 -----
 
-*Release date: 13-Jul-2026*
+*Release date: 04-Aug-2026*
 
-inferFun is now updated to include ABCModel and inferABCModels as the main ABC-SMC inference tools
+Minor: score function now accepts eps as a parameter
 
+2.2.6 *13-Jul-2026*
 1.2.1
 1.2
 1.1 *13-Sep-2018*
@@ -20,6 +21,7 @@ inferFun is now updated to include ABCModel and inferABCModels as the main ABC-S
 0.1 *28-Sep-2015*
 -----
 
+* inferFun is now updated to include ABCModel and inferABCModels as the main ABC-SMC inference tools
 * Prevented premature termination during kde.evaluate (needs a better solution)
 * Fixed a bug in reading output (Python 3)
 * Compatible with Python 3

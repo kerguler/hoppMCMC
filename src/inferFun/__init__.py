@@ -59,11 +59,11 @@ class ABCModel:
         A parameter vector is accepted at threshold `eps` if the returned score
         is finite, non-negative, and smaller than `eps`.
 
-        The function may optionally accept `verbose=False`.
+        The function may optionally accept `eps` and `verbose`.
 
         Example
         -------
-        >>> def score(par, verbose=False):
+        >>> def score(par, eps, verbose=False):
         ...     y = model_prediction(par)
         ...     return numpy.sqrt(numpy.mean((y - yobs) ** 2))
 
@@ -426,10 +426,10 @@ class inferABCModels:
             return -numpy.inf
         return -numpy.sum(numpy.log(width))
 
-    def eval_score(self, model_id, pr):
+    def eval_score(self, model_id, pr, eps):
         scorefun = self.models[model_id].score
         try:
-            return scorefun(pr, verbose=False)
+            return scorefun(pr, eps=eps, verbose=False)
         except TypeError:
             return scorefun(pr)
 
@@ -760,7 +760,7 @@ class inferABCModels:
             if self.in_bounds(model_id, pr_new):
                 break
 
-        scr_new = self.eval_score(model_id, pr_new)
+        scr_new = self.eval_score(model_id, pr_new, eps)
 
         if self.check(scr, scr_new, eps):
             return {
